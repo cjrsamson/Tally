@@ -1,6 +1,6 @@
 /**
  * POST /api/estimate
- * Body: { content: [ ...Anthropic message content blocks ] }
+ * Body: { content: [ ...Anthropic message content blocks ], system?: string }
  *
  * Keeps ANTHROPIC_API_KEY on the server. The browser never sees it.
  * Requires the x-tally-pass header to match APP_PASSCODE, so a stranger
@@ -39,6 +39,18 @@ export default async function handler(req, res) {
     return;
   }
 
+  const payload = {
+    model: process.env.MODEL || "claude-sonnet-4-6",
+    max_tokens: 1500,
+    // Estimation should be repeatable: the same plate should not swing
+    // 200 calories between two attempts.
+    temperature: 0,
+    messages: [{ role: "user", content }],
+  };
+  if (typeof body.system === "string" && body.system.trim()) {
+    payload.system = body.system;
+  }
+
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -47,11 +59,7 @@ export default async function handler(req, res) {
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: process.env.MODEL || "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content }],
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await r.json();

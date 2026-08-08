@@ -13,8 +13,16 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 <link rel="icon" href="/icons/icon-192.png" />
+
+<link rel="preconnect" href="https://esm.sh" crossorigin />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap" />
+<link rel="modulepreload" href="https://esm.sh/preact@10.24.3" />
+<link rel="modulepreload" href="https://esm.sh/preact@10.24.3/hooks" />
+<link rel="modulepreload" href="https://esm.sh/htm@3.1.1" />
+
+<link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap" />
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap" /></noscript>
 <style>
 :root{
   --bg:#F7F8F5; --surface:#FFF; --ink:#14171A; --mid:#6B7280; --line:#EAECE6;
@@ -35,6 +43,9 @@ button,input,select{font-family:inherit}
 .top{padding:calc(18px + env(safe-area-inset-top)) 0 6px;display:flex;align-items:center;justify-content:space-between}
 .brand{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:23px;letter-spacing:-.045em}
 .streak{display:flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 13px 6px 10px;font-weight:700;font-size:14px}
+
+.hello{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:20px;letter-spacing:-.03em;margin-top:12px;line-height:1.2}
+.hello-s{font-size:13px;color:var(--mid);font-weight:500;margin-top:3px}
 
 .strip{display:flex;gap:4px;padding:8px 0 2px}
 .day{flex:1;border:none;background:none;cursor:pointer;padding:6px 0;border-radius:14px}
@@ -89,6 +100,13 @@ button,input,select{font-family:inherit}
 .pill[data-on="1"]{background:var(--ink);border-color:var(--ink);color:#fff}
 .x{background:var(--bg);border:none;width:30px;height:30px;border-radius:50%;color:var(--mid);cursor:pointer;font-size:15px;flex:none}
 
+/* big pick-a-source buttons on the add sheet */
+.bigb{display:flex;align-items:center;gap:13px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:14px 15px;cursor:pointer;text-align:left;margin-top:9px}
+.bigb:active{background:var(--bg)}
+.bigb-i{width:44px;height:44px;border-radius:14px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:21px;flex:none}
+.bigb-t{font-weight:700;font-size:15px;color:var(--ink)}
+.bigb-s{font-size:12px;color:var(--mid);margin-top:2px;line-height:1.35}
+
 .verdict{border-radius:22px;padding:18px;margin-top:14px}
 .vhead{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:22px;letter-spacing:-.03em}
 .vsub{font-size:13.5px;line-height:1.5;margin-top:8px;opacity:.88}
@@ -101,6 +119,18 @@ button,input,select{font-family:inherit}
 .stepv{min-width:34px;text-align:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:15px}
 
 .ing{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--bg);border-radius:15px;margin-top:8px}
+/* tappable ingredient row */
+.ingb{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--bg);border:1px solid transparent;border-radius:15px;margin-top:8px;width:100%;cursor:pointer;text-align:left;color:var(--ink)}
+.ingb:active{border-color:#DCE0D6}
+.ined{background:var(--bg);border-radius:15px;margin-top:8px;padding:13px}
+.in2{width:100%;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:11px 12px;font-size:16px;font-weight:500;appearance:none}
+.in2:focus{outline:none;border-color:var(--ink)}
+.in2::placeholder{color:#9CA3AF;font-weight:400}
+.addb{width:100%;background:none;border:1px dashed #D7DBD1;color:var(--mid);border-radius:15px;padding:12px;margin-top:8px;font-size:13.5px;font-weight:600;cursor:pointer}
+.mini{border:none;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:9px 15px;font-size:13px;font-weight:700;cursor:pointer;color:var(--ink)}
+
+.conf{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;border-radius:999px;padding:4px 9px;letter-spacing:.01em}
+
 .note{font-size:13px;color:var(--mid);line-height:1.55}
 .err{color:var(--over);font-size:13px;margin-top:12px;line-height:1.45}
 .lab{font-size:12px;color:var(--mid);font-weight:600;margin-bottom:6px;display:block}

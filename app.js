@@ -53,7 +53,7 @@ const ACTIVITY = [
 const SLOTS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 const SLOT_ICON = { Breakfast: "🍳", Lunch: "🥗", Dinner: "🍽️", Snack: "🍎" };
 const DEFAULTS = {
-  heightCm: 166, age: 28, sex: "male", startWeight: 72.5,
+  name: "", heightCm: 166, age: 28, sex: "male", startWeight: 72.5,
   goalWeight: 69, stretchWeight: 66.5, activity: "light", weeklyLoss: 0.5,
 };
 
@@ -78,17 +78,54 @@ const tot = (e) => {
     carbs: Math.round(n.base.carbs * s), fat: Math.round(n.base.fat * s) };
 };
 
+/* When an ingredient is edited the meal total moves with it. Macros are held
+   in the same ratio, which is the honest thing to do when we only know the
+   calorie change and not which macro it came from. */
+function rescaleTo(b, newKcal) {
+  const k = Math.max(0, Math.round(newKcal));
+  const old = b.kcal || 0;
+  if (old <= 0) return { kcal: k, protein: b.protein || 0, carbs: b.carbs || 0, fat: b.fat || 0 };
+  const r = k / old;
+  return {
+    kcal: k,
+    protein: Math.max(0, Math.round((b.protein || 0) * r)),
+    carbs: Math.max(0, Math.round((b.carbs || 0) * r)),
+    fat: Math.max(0, Math.round((b.fat || 0) * r)),
+  };
+}
+
 /* ============================ api ============================ */
 
 const PASS_KEY = "tally.pass";
 const getPass = () => { try { return localStorage.getItem(PASS_KEY) || ""; } catch { return ""; } };
 const setPass = (v) => { try { localStorage.setItem(PASS_KEY, v); } catch {} };
 
-async function askClaude(content) {
+/* The rules that stop it inventing food that isn't on the plate. Sent as a
+   system prompt rather than buried in the user turn — it is followed far
+   more consistently there. */
+const SYSTEM = `You are the nutrition estimator inside a personal calorie tracker. You reply with JSON only — no prose, no markdown fences.
+
+Reading a photograph:
+- Report ONLY food you can actually see. Never add an item because it is commonly served with the dish. If a meal usually comes with rice, bread, a salad, a dip or a drink and it is not visible in the frame, it does not exist.
+- Do not invent what is hidden beneath or behind the visible food. Estimate the visible layer only, unless the shape of a bowl or wrapper makes the hidden volume genuinely obvious.
+- Judge portion size against something visible for scale: the rim of the plate or bowl, a fork, spoon or chopsticks, a hand, a standard glass or a drinks can. State what you used in "basis". If nothing in the frame gives scale, say so in "basis" and lower your confidence.
+- Count discrete items — eggs, prawns, dumplings, slices, skewers — only where you can see them. Where items overlap and the count is ambiguous, take the LOWER number.
+- Where the image is blurred, cropped, dim, or shot from an angle that hides the depth of the food, reduce confidence rather than filling the gap with a guess.
+- Do not describe the cuisine, the crockery or the setting. Only the food.
+
+Numbers:
+- Use round, defensible figures. Do not imply a precision you do not have.
+- The per-ingredient calories must add up to within 5% of "kcal".
+- "kcalLow" and "kcalHigh" are the honest range a careful dietitian would give for this photo. A tight range signals a clear read; a wide one signals a hard call.
+- "confidence" is "high" only when the food is fully visible, unambiguous and has a clear scale reference. Otherwise "medium", or "low" when you are largely inferring.
+
+Never comment on the person's body, never shame them, and never suggest skipping a meal to compensate.`;
+
+async function askClaude(content, system) {
   const r = await fetch("/api/estimate", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-tally-pass": getPass() },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, system: system || SYSTEM }),
   });
   if (r.status === 401) { const e = new Error("auth"); e.auth = true; throw e; }
   if (!r.ok) throw new Error("api " + r.status);
@@ -97,6 +134,14 @@ async function askClaude(content) {
   const cl = raw.replace(/```json|```/g, "").trim();
   return JSON.parse(cl.slice(cl.indexOf("{"), cl.lastIndexOf("}") + 1));
 }
+
+const SHAPE =
+  `{"name":"short dish name, max 6 words","kcal":integer,"protein":integer grams,"carbs":integer grams,` +
+  `"fat":integer grams,"kcalLow":integer,"kcalHigh":integer,"confidence":"high"|"medium"|"low",` +
+  `"basis":"the scale reference you used, max 10 words",` +
+  `"ingredients":[{"name":"component","qty":"portion as a person would say it, e.g. 1.5 cups or 120 g","kcal":integer}],` +
+  `"note":"one short sentence naming the biggest calorie driver",` +
+  `"advice":"one or two sentences of practical guidance"}`;
 
 const dataUrlParts = (u) => {
   if (!u) return null;
@@ -126,6 +171,95 @@ function Ring({ size, stroke, pct, color, track = "#EFF1EC", children }) {
           stroke-linecap="round" stroke-dasharray=${c} stroke-dashoffset=${c * (1 - p)} class="ringbar" />
       </svg>
       <div class="rm">${children}</div>
+    </div>`;
+}
+
+/* ============================ confidence chip ============================ */
+
+const CONF = {
+  high: { bg: "#F1FBDD", fg: "#31450A", label: "Clear read" },
+  medium: { bg: "#FFF6E5", fg: "#6B4A08", label: "Rough estimate" },
+  low: { bg: "#FEEDED", fg: "#7A1F22", label: "Hard to judge" },
+};
+
+function Confidence({ level, low, high, servings = 1 }) {
+  const c = CONF[level] || CONF.medium;
+  const spread = low && high && high > low;
+  return html`
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <span class="conf" style=${{ background: c.bg, color: c.fg }}>${c.label}</span>
+      ${spread && html`<span class="note" style="font-size:12px">
+        likely ${Math.round(low * servings)}–${Math.round(high * servings)} cal
+      </span>`}
+    </div>`;
+}
+
+/* ============================ editable ingredients ============================ */
+
+function IngredientList({ ings, base, servings, onChange }) {
+  const [edit, setEdit] = useState(-1);
+  const [draft, setDraft] = useState(null);
+  const list = ings || [];
+
+  const open = (i) => { setDraft({ ...list[i] }); setEdit(i); };
+
+  const commit = (next) => {
+    const before = list.reduce((a, g) => a + (parseFloat(g.kcal) || 0), 0);
+    const after = next.reduce((a, g) => a + (parseFloat(g.kcal) || 0), 0);
+    onChange({ ingredients: next, base: rescaleTo(base, (base.kcal || 0) + (after - before)) });
+    setEdit(-1); setDraft(null);
+  };
+
+  const saveRow = () => {
+    const next = list.slice();
+    next[edit] = { name: (draft.name || "").trim() || "Item", qty: (draft.qty || "").trim(),
+      kcal: Math.max(0, Math.round(parseFloat(draft.kcal) || 0)) };
+    commit(next);
+  };
+  const removeRow = () => commit(list.filter((_, i) => i !== edit));
+  const addRow = () => {
+    const next = [...list, { name: "", qty: "", kcal: 0 }];
+    onChange({ ingredients: next, base });
+    setDraft({ name: "", qty: "", kcal: 0 });
+    setEdit(next.length - 1);
+  };
+
+  return html`
+    <div style="margin-top:16px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between">
+        <div class="lab" style="margin:0">What's in it</div>
+        <span class="note" style="font-size:11.5px">Tap any line to correct it</span>
+      </div>
+
+      ${list.map((g, i) => edit === i && draft
+        ? html`
+          <div class="ined" key=${"e" + i}>
+            <input class="in2" placeholder="Ingredient" value=${draft.name}
+              onInput=${(ev) => setDraft({ ...draft, name: ev.target.value })} />
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <input class="in2" style="flex:1.6" placeholder="How much, e.g. 1 cup" value=${draft.qty}
+                onInput=${(ev) => setDraft({ ...draft, qty: ev.target.value })} />
+              <input class="in2" style="flex:1;text-align:center" type="number" inputmode="numeric"
+                placeholder="cal" value=${draft.kcal}
+                onInput=${(ev) => setDraft({ ...draft, kcal: ev.target.value })} />
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="mini" style="flex:1;color:#E5484D" onClick=${removeRow}>Remove</button>
+              <button class="mini" style=${{ flex: 1, background: "#14171A", color: "#fff", border: "none" }}
+                onClick=${saveRow}>Done</button>
+            </div>
+          </div>`
+        : html`
+          <button class="ingb" key=${"r" + i} onClick=${() => open(i)}>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px">${g.name || "Untitled"}</div>
+              ${g.qty && html`<div class="note" style="font-size:12px">${g.qty}</div>`}
+            </div>
+            <div class="d" style="font-weight:700;font-size:14px">${Math.round((parseFloat(g.kcal) || 0) * servings)} cal</div>
+            <span style="color:#C3C8CC;font-size:15px">✎</span>
+          </button>`)}
+
+      <button class="addb" onClick=${addRow}>+ Add something it missed</button>
     </div>`;
 }
 
@@ -201,6 +335,18 @@ export function App() {
 
   const liveDetail = detail ? entries.find((e) => e.id === detail) : null;
 
+  const hr = new Date().getHours();
+  const timeGreet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+  const greeting = profile.name ? timeGreet + ", " + profile.name : timeGreet;
+  const isToday = sel === todayKey();
+  const subline = !isToday
+    ? "Looking back at " + new Date(sel + "T00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })
+    : entries.length === 0
+      ? "Nothing logged yet today. " + T.kcal + " calories to play with."
+      : over
+        ? Math.abs(left) + " over budget today."
+        : left + " calories left for today.";
+
   return html`
     <div>
       <div class="wrap">
@@ -210,6 +356,9 @@ export function App() {
         </div>
 
         ${tab === "home" && html`
+          <div class="hello">${greeting}</div>
+          <div class="hello-s">${subline}</div>
+
           <div class="strip">
             ${strip.map((d) => html`
               <button key=${d.k} class="day" data-on=${sel === d.k ? "1" : "0"} onClick=${() => setSel(d.k)}>
@@ -261,7 +410,7 @@ export function App() {
             ? html`<div class="card empty">
                 <div style="font-size:30px">🥑</div>
                 <div style="margin-top:10px;font-weight:600;color:#14171A">Nothing logged yet</div>
-                <div class="note" style="margin-top:5px">Tap + to scan a meal, read a label, or check one before you eat it.</div>
+                <div class="note" style="margin-top:5px">Tap + to snap a plate, pick a photo, or just describe what you're having.</div>
               </div>`
             : entries.map((e) => {
                 const t = tot(e);
@@ -345,8 +494,8 @@ function PassSheet({ onClose }) {
 
 function LogSheet({ onClose, onAdd, eaten, budget, proteinLeft, onNeedPass }) {
   const guess = () => { const h = new Date().getHours(); return h < 11 ? "Breakfast" : h < 16 ? "Lunch" : h < 22 ? "Dinner" : "Snack"; };
-  const [mode, setMode] = useState("check");
-  const [scan, setScan] = useState("meal");
+  const [typing, setTyping] = useState(false);
+  const [isLabel, setIsLabel] = useState(false);
   const [slot, setSlot] = useState(guess);
   const [text, setText] = useState("");
   const [img, setImg] = useState(null);
@@ -354,7 +503,8 @@ function LogSheet({ onClose, onAdd, eaten, budget, proteinLeft, onNeedPass }) {
   const [err, setErr] = useState("");
   const [base, setBase] = useState(null);
   const [servings, setServings] = useState(1);
-  const fileRef = useRef(null);
+  const camRef = useRef(null);
+  const galRef = useRef(null);
 
   const m = base && {
     kcal: Math.round(base.kcal * servings), protein: Math.round(base.protein * servings),
@@ -380,37 +530,40 @@ function LogSheet({ onClose, onAdd, eaten, budget, proteinLeft, onNeedPass }) {
       const parts = [];
       if (img) parts.push({ type: "image", source: { type: "base64", media_type: img.media, data: img.b64 } });
 
-      const task = scan === "label"
-        ? "This is a photograph of a nutrition label or packaging. Read the panel and return the values for ONE serving as printed. If the person's note gives a different amount, scale to that. Put the serving size in \"note\"."
-        : "Estimate the nutrition of this meal at one normal portion. Judge portion size from visible references like the plate, cutlery, a hand or a cup. Assume normal cooking with typical oil and sauces unless stated otherwise. If it looks like restaurant or takeaway food, assume the higher end of the range.";
+      const task = isLabel
+        ? "This is a photograph of a nutrition label or packaging. Read the printed panel and return the values for ONE serving exactly as printed — do not adjust them. If the person's note names a different amount, scale to that. Put the serving size in \"basis\" and set confidence to \"high\" if the panel is legible."
+        : img
+          ? "Estimate the nutrition of the food in this photograph, at the portion shown. Assume normal cooking — the oil, butter and sauce a kitchen would actually use — unless the person says otherwise. If it looks like restaurant or takeaway food, lean to the higher end."
+          : "Estimate the nutrition of the meal described below, at one normal portion. Assume normal home cooking unless stated otherwise. Set \"basis\" to \"described, not seen\" and confidence to \"medium\" at best.";
 
-      const situation = mode === "check"
-        ? `\n\nContext: they have not eaten this yet and are deciding. They have ${Math.max(0, budget - eaten)} calories left of a ${budget} budget today and still need about ${proteinLeft}g of protein. In "advice", give one or two sentences of practical, non-judgemental guidance: whether it fits, and if not, the single most effective change (smaller portion, leave one component, swap the side, skip the drink). Never shame them and never suggest skipping a meal to compensate.`
-        : "";
+      const situation =
+        `\n\nBudget context: they have ${Math.max(0, budget - eaten)} calories left of a ${budget} budget today and still need about ${proteinLeft}g of protein. ` +
+        `In "advice", give one or two sentences of practical, non-judgemental guidance: whether this fits, and if not, the single most effective change — a smaller portion, leaving one component, swapping the side, skipping the drink.`;
 
       parts.push({
         type: "text",
         text: task + (text.trim() ? ` The person adds: "${text.trim()}"` : "") + situation +
-          `\n\nReply with ONLY a JSON object, no markdown fences and no other text:\n` +
-          `{"name":"short dish name, max 6 words","kcal":integer,"protein":integer grams,"carbs":integer grams,"fat":integer grams,` +
-          `"ingredients":[{"name":"component","qty":"portion as a person would say it, e.g. 1.5 cups or 120 g","kcal":integer}],` +
-          `"note":"one short sentence naming the biggest calorie driver"` +
-          (mode === "check" ? `,"advice":"one or two sentences of practical guidance"` : "") + `}\n` +
-          `List between 2 and 8 ingredients that together account for the calories.`,
+          `\n\nReply with ONLY this JSON object:\n` + SHAPE + `\n` +
+          `List between 2 and 8 ingredients, covering everything you can see and nothing you cannot.`,
       });
 
       const p = await askClaude(parts);
+      const kc = Math.max(0, Math.round(p.kcal || 0));
       setBase({
         name: p.name || "Meal",
-        kcal: Math.max(0, Math.round(p.kcal || 0)), protein: Math.max(0, Math.round(p.protein || 0)),
+        kcal: kc, protein: Math.max(0, Math.round(p.protein || 0)),
         carbs: Math.max(0, Math.round(p.carbs || 0)), fat: Math.max(0, Math.round(p.fat || 0)),
+        kcalLow: Math.max(0, Math.round(p.kcalLow || kc)), kcalHigh: Math.max(0, Math.round(p.kcalHigh || kc)),
+        confidence: CONF[p.confidence] ? p.confidence : "medium",
+        basis: p.basis || "",
         ingredients: Array.isArray(p.ingredients) ? p.ingredients.slice(0, 8) : [],
         note: p.note || "", advice: p.advice || "",
       });
     } catch (e) {
       if (e && e.auth) { onNeedPass(); setErr("Passcode needed before it can estimate."); }
       else setErr("That didn't come back. Try again, or type the numbers in yourself.");
-      setBase({ name: text.trim() || "Meal", kcal: 0, protein: 0, carbs: 0, fat: 0, ingredients: [], note: "", advice: "" });
+      setBase({ name: text.trim() || "Meal", kcal: 0, protein: 0, carbs: 0, fat: 0,
+        kcalLow: 0, kcalHigh: 0, confidence: "low", basis: "", ingredients: [], note: "", advice: "" });
     }
     setBusy(false);
   };
@@ -424,67 +577,86 @@ function LogSheet({ onClose, onAdd, eaten, budget, proteinLeft, onNeedPass }) {
   }[key];
   const max = Math.max(budget, projected);
 
+  const reset = () => { setBase(null); setImg(null); setText(""); setTyping(false); setIsLabel(false); setErr(""); };
+
   return html`
     <div class="scrim" onClick=${onClose}>
       <div class="sheet" onClick=${(e) => e.stopPropagation()}>
         <div class="grab"></div>
 
-        <div class="seg">
-          <button class="segb" data-on=${mode === "check" ? "1" : "0"} onClick=${() => { setMode("check"); setBase(null); }}>Should I eat it?</button>
-          <button class="segb" data-on=${mode === "log" ? "1" : "0"} onClick=${() => { setMode("log"); setBase(null); }}>Already ate it</button>
-        </div>
+        <input ref=${camRef} type="file" accept="image/*" capture="environment" style="display:none"
+          onChange=${(e) => { pick(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+        <input ref=${galRef} type="file" accept="image/*" style="display:none"
+          onChange=${(e) => { pick(e.target.files && e.target.files[0]); e.target.value = ""; }} />
 
-        <div style="display:flex;gap:6px;margin-top:12px">
-          <button class="pill" data-on=${scan === "meal" ? "1" : "0"} onClick=${() => setScan("meal")}>🍽️ Scan food</button>
-          <button class="pill" data-on=${scan === "label" ? "1" : "0"} onClick=${() => setScan("label")}>🏷️ Nutrition label</button>
-        </div>
+        ${!m && html`
+          <div>
+            <div class="h">What are you having?</div>
 
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
-          ${SLOTS.map((s) => html`<button class="pill" key=${s} data-on=${slot === s ? "1" : "0"} onClick=${() => setSlot(s)}>${s}</button>`)}
-        </div>
+            ${img
+              ? html`
+                <div style="margin-top:13px;position:relative">
+                  <img src=${img.url} alt="" style="width:100%;max-height:210px;object-fit:cover;border-radius:20px" />
+                  <button class="x" style="position:absolute;top:10px;right:10px;background:rgba(20,23,26,.7);color:#fff"
+                    onClick=${() => setImg(null)}>×</button>
+                </div>`
+              : html`
+                <div>
+                  <button class="bigb" onClick=${() => camRef.current && camRef.current.click()}>
+                    <div class="bigb-i">📷</div>
+                    <div><div class="bigb-t">Snap the plate</div><div class="bigb-s">Straight to the camera</div></div>
+                  </button>
+                  <button class="bigb" onClick=${() => galRef.current && galRef.current.click()}>
+                    <div class="bigb-i">🖼️</div>
+                    <div><div class="bigb-t">Choose a photo</div><div class="bigb-s">From your camera roll</div></div>
+                  </button>
+                  ${!typing && html`
+                    <button class="bigb" onClick=${() => setTyping(true)}>
+                      <div class="bigb-i">✏️</div>
+                      <div><div class="bigb-t">Just describe it</div><div class="bigb-s">No photo needed</div></div>
+                    </button>`}
+                </div>`}
 
-        ${img && html`
-          <div style="margin-top:13px;position:relative">
-            <img src=${img.url} alt="" style="width:100%;max-height:200px;object-fit:cover;border-radius:20px" />
-            <button class="x" style="position:absolute;top:10px;right:10px;background:rgba(20,23,26,.7);color:#fff"
-              onClick=${() => { setImg(null); if (fileRef.current) fileRef.current.value = ""; }}>×</button>
+            ${(img || typing) && html`
+              <input class="in" style="margin-top:11px" autofocus=${typing && !img}
+                placeholder=${isLabel ? "How much of it are you having?" : img ? "Anything it can't see? Optional" : "Chicken machboos with rice"}
+                value=${text} onInput=${(e) => setText(e.target.value)}
+                onKeyDown=${(e) => { if (e.key === "Enter" && !busy) run(); }} />`}
+
+            ${img && html`
+              <div style="display:flex;gap:6px;margin-top:10px">
+                <button class="pill" data-on=${!isLabel ? "1" : "0"} onClick=${() => setIsLabel(false)}>🍽️ It's food</button>
+                <button class="pill" data-on=${isLabel ? "1" : "0"} onClick=${() => setIsLabel(true)}>🏷️ It's a label</button>
+              </div>`}
+
+            ${(img || typing) && html`
+              <button class="b" style="margin-top:11px" onClick=${run} disabled=${busy || (!img && !text.trim())}>
+                ${busy ? html`<span class="spin"></span>Working it out` : "Work out the calories"}
+              </button>`}
+
+            ${err && html`<div class="err">${err}</div>`}
           </div>`}
-
-        <input ref=${fileRef} type="file" accept="image/*" capture="environment" style="display:none"
-          onChange=${(e) => pick(e.target.files && e.target.files[0])} />
-
-        ${!img && html`<button class="b b2" style="margin-top:13px" onClick=${() => fileRef.current && fileRef.current.click()}>
-          📷 ${scan === "label" ? "Photograph the label" : "Snap the plate"}
-        </button>`}
-
-        <input class="in" style="margin-top:9px"
-          placeholder=${scan === "label" ? "How much of it are you having?" : "Chicken machboos with rice"}
-          value=${text} onInput=${(e) => setText(e.target.value)}
-          onKeyDown=${(e) => { if (e.key === "Enter" && !busy) run(); }} />
-
-        <button class="b" style="margin-top:9px" onClick=${run} disabled=${busy || (!img && !text.trim())}>
-          ${busy ? html`<span class="spin"></span>Working it out` : mode === "check" ? "Check against today" : "Get the numbers"}
-        </button>
-
-        ${err && html`<div class="err">${err}</div>`}
 
         ${m && html`
           <div>
-            ${mode === "check" && html`
-              <div class="verdict" style=${{ background: V.bg, color: V.fg }}>
-                <div class="vhead">${V.head}${key === "over" ? " by " + Math.abs(after) : ""}</div>
-                <div class="vsub">${base.name}, about <strong>${m.kcal} cal</strong>. You'd be at ${projected} of ${budget}${after >= 0 ? ", with " + after + " left for the day." : "."}</div>
-                <div class="track">
-                  <div style=${{ width: (eaten / max) * 100 + "%", background: V.ac, opacity: .4 }}></div>
-                  <div style=${{ width: (m.kcal / max) * 100 + "%", background: V.ac }}></div>
-                  <div class="mark" style=${{ left: (budget / max) * 100 + "%" }}></div>
-                </div>
-                ${base.advice && html`<div class="vsub">${base.advice}</div>`}
-                ${proteinLeft > 0 && m.protein >= proteinLeft * 0.4 && html`<div class="vsub">Strong on protein: ${m.protein}g of the ${proteinLeft}g you still need.</div>`}
-              </div>`}
+            <div class="verdict" style=${{ background: V.bg, color: V.fg, marginTop: 0 }}>
+              <div class="vhead">${V.head}${key === "over" ? " by " + Math.abs(after) : ""}</div>
+              <div class="vsub">${base.name}, about <strong>${m.kcal} cal</strong>. That would put you at ${projected} of ${budget}${after >= 0 ? ", with " + after + " left for the day." : "."}</div>
+              <div class="track">
+                <div style=${{ width: (eaten / max) * 100 + "%", background: V.ac, opacity: .4 }}></div>
+                <div style=${{ width: (m.kcal / max) * 100 + "%", background: V.ac }}></div>
+                <div class="mark" style=${{ left: (budget / max) * 100 + "%" }}></div>
+              </div>
+              ${base.advice && html`<div class="vsub">${base.advice}</div>`}
+              ${proteinLeft > 0 && m.protein >= proteinLeft * 0.4 && html`<div class="vsub">Strong on protein: ${m.protein}g of the ${proteinLeft}g you still need.</div>`}
+            </div>
+
+            <${Confidence} level=${base.confidence} low=${base.kcalLow} high=${base.kcalHigh} servings=${servings} />
+            ${base.basis && html`<div class="note" style="font-size:12px;margin-top:6px">Judged against ${base.basis}.</div>`}
 
             <div style="margin-top:15px;display:flex;gap:10px;align-items:center">
-              <input class="in" style="flex:1" value=${base.name} onInput=${(e) => setBase({ ...base, name: e.target.value })} />
+              ${img && html`<img src=${img.thumb} alt="" style="width:52px;height:52px;border-radius:15px;object-fit:cover;flex:none" />`}
+              <input class="in" style="flex:1;min-width:0" value=${base.name} onInput=${(e) => setBase({ ...base, name: e.target.value })} />
               <div class="step">
                 <button class="stepb" onClick=${() => setServings((s) => Math.max(0.25, Math.round((s - 0.25) * 100) / 100))} disabled=${servings <= 0.25}>−</button>
                 <span class="stepv">${servings}</span>
@@ -504,29 +676,28 @@ function LogSheet({ onClose, onAdd, eaten, budget, proteinLeft, onNeedPass }) {
                 </div>`)}
             </div>
 
-            ${base.ingredients && base.ingredients.length > 0 && html`
-              <div style="margin-top:16px">
-                <div class="lab">What's in it</div>
-                ${base.ingredients.map((g, i) => html`
-                  <div class="ing" key=${i}>
-                    <div style="flex:1">
-                      <div style="font-weight:600;font-size:14px">${g.name}</div>
-                      <div class="note" style="font-size:12px">${g.qty}</div>
-                    </div>
-                    <div class="d" style="font-weight:700;font-size:14px">${Math.round((g.kcal || 0) * servings)} cal</div>
-                  </div>`)}
-              </div>`}
+            <${IngredientList} ings=${base.ingredients} servings=${servings}
+              base=${{ kcal: base.kcal, protein: base.protein, carbs: base.carbs, fat: base.fat }}
+              onChange=${({ ingredients, base: nb }) => setBase({ ...base, ...nb, ingredients })} />
 
             ${base.note && html`<div class="note" style="margin-top:11px">${base.note}</div>`}
 
-            <button class="b b3" style="margin-top:14px" onClick=${() => onAdd({
+            <div style="margin-top:16px">
+              <div class="lab">When was this?</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${SLOTS.map((s) => html`<button class="pill" key=${s} data-on=${slot === s ? "1" : "0"} onClick=${() => setSlot(s)}>${s}</button>`)}
+              </div>
+            </div>
+
+            <button class="b b3" style="margin-top:16px" onClick=${() => onAdd({
               name: base.name, slot, servings,
               base: { kcal: base.kcal, protein: base.protein, carbs: base.carbs, fat: base.fat },
               ingredients: base.ingredients || [], note: base.note || "", thumb: img ? img.thumb : null,
             })}>
-              ${mode === "check" ? "Eat it · log " + m.kcal + " cal" : "Add " + m.kcal + " cal"}
+              Log it · ${m.kcal} cal
             </button>
-            ${mode === "check" && html`<button class="b b2" style="margin-top:8px" onClick=${onClose}>Skip it</button>`}
+            <button class="b b2" style="margin-top:8px" onClick=${onClose}>Just checking — don't log it</button>
+            <button class="b b2" style="margin-top:8px" onClick=${reset}>Start again</button>
           </div>`}
       </div>
     </div>`;
@@ -554,8 +725,10 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
           `${e.base.protein}g protein, ${e.base.carbs}g carbs, ${e.base.fat}g fat.` +
           (e.ingredients && e.ingredients.length ? ` Ingredients: ${e.ingredients.map((g) => g.name + " (" + g.qty + ")").join(", ")}.` : "") +
           `\n\nThe person says the estimate is wrong: "${fixText.trim()}"\n\n` +
-          `Revise the estimate for ONE serving accordingly. Reply with ONLY a JSON object, no markdown fences:\n` +
+          `Trust what they say over what the photograph appears to show — they were there. ` +
+          `Revise the estimate for ONE serving accordingly. Reply with ONLY this JSON object:\n` +
           `{"name":"short dish name","kcal":integer,"protein":integer,"carbs":integer,"fat":integer,` +
+          `"kcalLow":integer,"kcalHigh":integer,"confidence":"high"|"medium"|"low",` +
           `"ingredients":[{"name":"component","qty":"portion","kcal":integer}],"note":"one sentence on what changed"}`,
       });
       const p = await askClaude(parts);
@@ -618,27 +791,20 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
             </div>`)}
         </div>
 
-        ${e.ingredients && e.ingredients.length > 0 && html`
-          <div style="margin-top:20px">
-            <div class="h" style="font-size:15px">Ingredients</div>
-            ${e.ingredients.map((g, i) => html`
-              <div class="ing" key=${i}>
-                <div style="flex:1">
-                  <div style="font-weight:600;font-size:14px">${g.name}</div>
-                  <div class="note" style="font-size:12px">${g.qty}</div>
-                </div>
-                <div class="d" style="font-weight:700;font-size:14px">${Math.round((g.kcal || 0) * s)} cal</div>
-              </div>`)}
-          </div>`}
+        <${IngredientList} ings=${e.ingredients} servings=${s} base=${e.base}
+          onChange=${({ ingredients, base }) => onPatch({ ingredients, base })} />
 
         ${e.note && html`<div class="note" style="margin-top:14px">${e.note}</div>`}
 
         ${fixing
           ? html`<div style="margin-top:18px">
-              <label class="lab">What did it get wrong?</label>
+              <label class="lab">Tell it what's wrong</label>
               <input class="in" autofocus placeholder="No dressing, and the portion was double"
                 value=${fixText} onInput=${(ev) => setFixText(ev.target.value)}
                 onKeyDown=${(ev) => { if (ev.key === "Enter" && !busy) applyFix(); }} />
+              <div class="note" style="font-size:12px;margin-top:8px">
+                Best for whole-dish corrections. For one item, tap it in the list above.
+              </div>
               ${err && html`<div class="err">${err}</div>`}
               <button class="b" style="margin-top:10px" onClick=${applyFix} disabled=${busy || !fixText.trim()}>
                 ${busy ? html`<span class="spin"></span>Recalculating` : "Update the estimate"}
@@ -646,7 +812,7 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
               <button class="b b2" style="margin-top:8px" onClick=${() => { setFixing(false); setErr(""); }}>Cancel</button>
             </div>`
           : html`<div style="display:flex;gap:9px;margin-top:20px">
-              <button class="b b2" onClick=${() => setFixing(true)}>✦ Fix results</button>
+              <button class="b b2" onClick=${() => setFixing(true)}>✦ Redo the whole thing</button>
               <button class="b" onClick=${onClose}>Done</button>
             </div>`}
 
@@ -798,6 +964,11 @@ function Profile({ profile, weight, days, weights, onSave, onWipe }) {
       <div class="card">
         <div class="h">Your plan</div>
         <div style="margin-top:15px">
+          <label class="lab">What should it call you?</label>
+          <input class="in" placeholder="Your first name" value=${p.name || ""}
+            onInput=${(e) => setP({ ...p, name: e.target.value })} />
+        </div>
+        <div style="margin-top:13px">
           <label class="lab">How much you move</label>
           <select class="in" value=${p.activity} onChange=${(e) => setP({ ...p, activity: e.target.value })}>
             ${ACTIVITY.map((a) => html`<option key=${a.id} value=${a.id}>${a.label}</option>`)}
