@@ -331,6 +331,25 @@ export function App() {
     setDetail(null);
   };
 
+  /* Merge a backup in rather than overwrite, so nothing logged on this
+     device since the backup was taken gets lost. Meals are matched on id,
+     weigh-ins on date plus value. */
+  const importBackup = (data) => {
+    const nd = { ...days };
+    Object.entries(data.days || {}).forEach(([k, arr]) => {
+      if (!Array.isArray(arr)) return;
+      const have = nd[k] || [];
+      const ids = new Set(have.map((e) => e.id));
+      nd[k] = [...have, ...arr.filter((e) => e && !ids.has(e.id))]
+        .sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    });
+    const seen = new Set(weights.map((w) => w.d + ":" + w.kg));
+    const nw = [...weights, ...(data.weights || []).filter((w) => w && w.d && !seen.has(w.d + ":" + w.kg))]
+      .sort((a, b) => String(a.d).localeCompare(String(b.d)))
+      .slice(-800);
+    save({ profile: { ...profile, ...(data.profile || {}) }, days: nd, weights: nw });
+  };
+
   if (!ready) return html`<div class="wrap" style="padding-top:60px"><span class="note">Loading…</span></div>`;
 
   const liveDetail = detail ? entries.find((e) => e.id === detail) : null;
@@ -443,6 +462,7 @@ export function App() {
         ${tab === "profile" && html`<${Profile} profile=${profile} weight=${weight}
           days=${days} weights=${weights}
           onSave=${(p) => save({ profile: p })}
+          onImport=${importBackup}
           onWipe=${() => { saveState({ profile: DEFAULTS, days: {}, weights: [] }); setDays({}); setWeights([]); setProfile(DEFAULTS); }} />`}
       </div>
 
@@ -945,18 +965,49 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
 
 /* ============================ profile ============================ */
 
-function Profile({ profile, weight, days, weights, onSave, onWipe }) {
+function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
   const [p, setP] = useState(profile);
   const [confirm, setConfirm] = useState(false);
+  const [pending, setPending] = useState(null);
+  const [impErr, setImpErr] = useState("");
+  const [done, setDone] = useState("");
+  const fileRef = useRef(null);
   const t = deriveTargets(p, weight);
   const dirty = JSON.stringify(p) !== JSON.stringify(profile);
 
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ profile, days, weights }, null, 2)], { type: "application/json" });
+  const exportJson = async () => {
+    const text = JSON.stringify({ profile, days, weights }, null, 2);
+    const filename = "tally-" + todayKey() + ".json";
+    /* On an iPhone the app runs full screen with no download bar, so a plain
+       link click can vanish silently. The share sheet is the reliable route;
+       fall back to a download everywhere else. */
+    try {
+      const file = new File([text], filename, { type: "application/json" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "tally backup" });
+        return;
+      }
+    } catch { /* cancelled or unsupported — fall through */ }
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "tally-" + todayKey() + ".json";
+    a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    a.download = filename;
     a.click();
+  };
+
+  const readBackup = async (file) => {
+    setImpErr(""); setDone("");
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || typeof data !== "object" || (!data.days && !data.weights)) {
+        setImpErr("That doesn't look like a tally backup."); return;
+      }
+      const dayKeys = Object.keys(data.days || {});
+      const meals = dayKeys.reduce((a, k) => a + (Array.isArray(data.days[k]) ? data.days[k].length : 0), 0);
+      setPending({ data, meals, dayKeys: dayKeys.length, weighIns: (data.weights || []).length });
+    } catch {
+      setImpErr("Couldn't read that file. Make sure it's the .json backup.");
+    }
   };
 
   return html`
@@ -1020,6 +1071,32 @@ function Profile({ profile, weight, days, weights, onSave, onWipe }) {
           clear your browser data or change device.
         </div>
         <button class="b b2" style="margin-top:13px" onClick=${exportJson}>Export a backup</button>
+
+        <input ref=${fileRef} type="file" accept="application/json,.json" style="display:none"
+          onChange=${(e) => { readBackup(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+
+        ${pending
+          ? html`
+            <div style="background:var(--bg);border-radius:18px;padding:15px;margin-top:8px">
+              <div style="font-weight:700;font-size:14.5px">Restore this backup?</div>
+              <div class="note" style="margin-top:6px">
+                ${"It holds " + pending.meals + " meal" + (pending.meals === 1 ? "" : "s") +
+                  " across " + pending.dayKeys + " day" + (pending.dayKeys === 1 ? "" : "s") +
+                  " and " + pending.weighIns + " weigh-in" + (pending.weighIns === 1 ? "" : "s") +
+                  ". Anything already on this phone stays — the two are merged."}
+              </div>
+              <button class="b b3" style="margin-top:12px" onClick=${() => {
+                onImport(pending.data);
+                setDone("Restored " + pending.meals + " meals.");
+                setPending(null);
+              }}>Merge it in</button>
+              <button class="b b2" style="margin-top:8px" onClick=${() => setPending(null)}>Cancel</button>
+            </div>`
+          : html`<button class="b b2" style="margin-top:8px" onClick=${() => fileRef.current && fileRef.current.click()}>Restore from a backup</button>`}
+
+        ${impErr && html`<div class="err">${impErr}</div>`}
+        ${done && html`<div class="note" style="margin-top:10px;color:#5C8C52;font-weight:600">${done}</div>`}
+
         <button class="b b2" style="margin-top:8px" onClick=${() => { setPass(""); location.reload(); }}>Change passcode</button>
         ${confirm
           ? html`<div style="margin-top:8px">
