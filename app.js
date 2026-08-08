@@ -53,9 +53,15 @@ const ACTIVITY = [
 const SLOTS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 const SLOT_ICON = { Breakfast: "🍳", Lunch: "🥗", Dinner: "🍽️", Snack: "🍎" };
 const DEFAULTS = {
-  name: "", heightCm: 166, age: 28, sex: "male", startWeight: 72.5,
-  goalWeight: 69, stretchWeight: 66.5, activity: "light", weeklyLoss: 0.5,
+  onboarded: false,
+  name: "", heightCm: 170, age: 30, sex: "male", startWeight: 75,
+  goalWeight: 72, stretchWeight: 70, activity: "light", weeklyLoss: 0.5,
 };
+
+/* Used to keep goals inside a sane range. Not a diagnosis — just the
+   standard healthy-weight band for a height. */
+const bmiOf = (kg, cm) => kg / Math.pow((cm || 1) / 100, 2);
+const minHealthyKg = (cm) => Math.round(18.5 * Math.pow((cm || 1) / 100, 2) * 10) / 10;
 
 function deriveTargets(p, w0) {
   const w = w0 || p.startWeight;
@@ -64,8 +70,11 @@ function deriveTargets(p, w0) {
   const floor = p.sex === "female" ? 1200 : 1500;
   const kcal = Math.max(floor, Math.round((tdee - (p.weeklyLoss * 7700) / 7) / 10) * 10);
   const protein = Math.round(w * 1.8), fat = Math.round(w * 0.8);
+  /* Carbs take whatever calories protein and fat leave behind, converted to
+     grams at 4 cal per gram, then rounded to the nearest 5. */
+  const carbCals = kcal - protein * 4 - fat * 9;
   return { bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein, fat,
-    carbs: Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 5) * 5) };
+    carbs: Math.max(0, Math.round(carbCals / 4 / 5) * 5) };
 }
 
 const norm = (e) => e.base ? e : {
@@ -280,7 +289,10 @@ export function App() {
     (async () => {
       const d = await loadState();
       if (d) {
-        setProfile({ ...DEFAULTS, ...(d.profile || {}) });
+        /* Anyone with saved state was using tally before onboarding existed,
+           so don't drag them back through it. */
+        setProfile({ ...DEFAULTS, ...(d.profile || {}),
+          onboarded: (d.profile && d.profile.onboarded) !== false });
         setDays(d.days || {});
         setWeights(d.weights || []);
       }
@@ -351,6 +363,14 @@ export function App() {
   };
 
   if (!ready) return html`<div class="wrap" style="padding-top:60px"><span class="note">Loading…</span></div>`;
+
+  if (!profile.onboarded) {
+    return html`<${Onboarding} onDone=${(p, firstWeight) => {
+      const w = [{ d: todayKey(), kg: firstWeight }];
+      setProfile(p); setWeights(w); setDays({});
+      saveState({ profile: p, days: {}, weights: w });
+    }} />`;
+  }
 
   const liveDetail = detail ? entries.find((e) => e.id === detail) : null;
 
@@ -463,7 +483,11 @@ export function App() {
           days=${days} weights=${weights}
           onSave=${(p) => save({ profile: p })}
           onImport=${importBackup}
-          onWipe=${() => { saveState({ profile: DEFAULTS, days: {}, weights: [] }); setDays({}); setWeights([]); setProfile(DEFAULTS); }} />`}
+          onWipe=${() => {
+            const fresh = { ...DEFAULTS, onboarded: false };
+            saveState({ profile: fresh, days: {}, weights: [] });
+            setDays({}); setWeights([]); setProfile(fresh);
+          }} />`}
       </div>
 
       <div class="nav">
@@ -486,6 +510,180 @@ export function App() {
         onNeedPass=${() => setNeedPass(true)} />`}
 
       ${needPass && html`<${PassSheet} onClose=${() => setNeedPass(false)} />`}
+    </div>`;
+}
+
+/* ============================ onboarding ============================ */
+
+function Onboarding({ onDone }) {
+  const [i, setI] = useState(0);
+  const [f, setF] = useState({
+    name: "", age: "", sex: "male", heightCm: "", weight: "", goalWeight: "",
+    activity: "light", weeklyLoss: 0.5, pass: "",
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const age = parseInt(f.age, 10);
+  const cm = parseFloat(f.heightCm);
+  const kg = parseFloat(f.weight);
+  const goal = parseFloat(f.goalWeight);
+
+  const tooYoung = f.age !== "" && isFinite(age) && age < 18;
+  const floorKg = isFinite(cm) && cm > 0 ? minHealthyKg(cm) : null;
+  const goalTooLow = isFinite(goal) && floorKg !== null && goal < floorKg;
+  const goalNotLower = isFinite(goal) && isFinite(kg) && goal >= kg;
+  const alreadyLean = isFinite(kg) && isFinite(cm) && bmiOf(kg, cm) < 18.5;
+
+  const okStep = [
+    () => f.name.trim().length > 0,
+    () => isFinite(age) && age >= 18 && age <= 100 && isFinite(cm) && cm >= 120 && cm <= 230,
+    () => isFinite(kg) && kg >= 35 && kg <= 250 && isFinite(goal) && goal >= 35 && goal <= 250 && !goalNotLower,
+    () => true,
+    () => true,
+  ][i]();
+
+  const draft = {
+    ...DEFAULTS, onboarded: true, name: f.name.trim(), age, sex: f.sex, heightCm: Math.round(cm),
+    startWeight: kg, goalWeight: goal, stretchWeight: Math.max(floorKg || 0, Math.round((goal - 2.5) * 10) / 10),
+    activity: f.activity, weeklyLoss: f.weeklyLoss,
+  };
+  const T = i === 4 ? deriveTargets(draft, kg) : null;
+  const atFloor = T && T.kcal <= (f.sex === "female" ? 1200 : 1500);
+
+  const finish = () => {
+    if (f.pass.trim()) setPass(f.pass.trim());
+    onDone(draft, kg);
+  };
+
+  const Head = (t, s) => html`<div><div class="obh">${t}</div><div class="obs">${s}</div></div>`;
+
+  return html`
+    <div class="ob">
+      <div class="dots">
+        ${[0, 1, 2, 3, 4].map((n) => html`<div class="dot" key=${n} data-on=${n <= i ? "1" : "0"}></div>`)}
+      </div>
+
+      <div style="flex:1">
+        ${i === 0 && html`
+          <div>
+            ${Head("Welcome to tally", "A calorie tracker you can point at your food. First, a few questions so the numbers are yours and not someone else's.")}
+            <div style="margin-top:22px">
+              <label class="lab">What should it call you?</label>
+              <input class="in" autofocus placeholder="First name" value=${f.name} onInput=${set("name")} />
+            </div>
+            <div class="obs" style="font-size:12.5px;margin-top:18px">
+              Everything you log stays on this phone. Nothing is uploaded, and nobody else can see it — not even the person who shared this with you.
+            </div>
+          </div>`}
+
+        ${i === 1 && html`
+          <div>
+            ${Head("About you", "Age, height and sex go into the equation that estimates what your body burns at rest.")}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px">
+              <div>
+                <label class="lab">Age</label>
+                <input class="in" type="number" inputmode="numeric" placeholder="28" value=${f.age} onInput=${set("age")} />
+              </div>
+              <div>
+                <label class="lab">Height (cm)</label>
+                <input class="in" type="number" inputmode="numeric" placeholder="166" value=${f.heightCm} onInput=${set("heightCm")} />
+              </div>
+            </div>
+            <div style="margin-top:16px">
+              <label class="lab">Which does the formula fit better?</label>
+              ${[["male", "Male"], ["female", "Female"]].map(([v, l]) => html`
+                <button class="opt" key=${v} data-on=${f.sex === v ? "1" : "0"} onClick=${() => setF({ ...f, sex: v })}>${l}</button>`)}
+            </div>
+            ${tooYoung && html`
+              <div class="stop">
+                <strong>tally isn't built for under 18s.</strong><br />
+                The equation it uses is for adult bodies, and calorie targets for someone still growing are
+                something a doctor should set — not an app. If you'd like help with eating well, a GP or a
+                school nurse is the right place to start.
+              </div>`}
+          </div>`}
+
+        ${i === 2 && html`
+          <div>
+            ${Head("Where you are, where you're heading", "Weigh yourself in the morning if you can — it's the most consistent time.")}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px">
+              <div>
+                <label class="lab">Weight now (kg)</label>
+                <input class="in" type="number" step="0.1" inputmode="decimal" placeholder="72.5" value=${f.weight} onInput=${set("weight")} />
+              </div>
+              <div>
+                <label class="lab">Goal (kg)</label>
+                <input class="in" type="number" step="0.5" inputmode="decimal" placeholder="69" value=${f.goalWeight} onInput=${set("goalWeight")} />
+              </div>
+            </div>
+            ${goalNotLower && html`<div class="warn">tally is set up for losing weight, so your goal needs to be below where you are now.</div>`}
+            ${alreadyLean && !goalNotLower && html`
+              <div class="warn">
+                You're already at the lean end of the healthy range for your height. Losing more isn't
+                something to take on without talking to a doctor first.
+              </div>`}
+            ${goalTooLow && !goalNotLower && !alreadyLean && html`
+              <div class="warn">
+                ${goal + " kg is below the healthy weight range for " + Math.round(cm) + " cm — that range starts around " + floorKg + " kg. You can carry on, but it's worth a conversation with a doctor before aiming there."}
+              </div>`}
+          </div>`}
+
+        ${i === 3 && html`
+          <div>
+            ${Head("How much do you move?", "Be honest rather than optimistic — an overestimate here inflates your budget every single day.")}
+            <div style="margin-top:18px">
+              ${ACTIVITY.map((a) => html`
+                <button class="opt" key=${a.id} data-on=${f.activity === a.id ? "1" : "0"}
+                  onClick=${() => setF({ ...f, activity: a.id })}>${a.label}</button>`)}
+            </div>
+            <div style="margin-top:20px">
+              <label class="lab">How fast do you want it to come off?</label>
+              ${[[0.25, "0.25 kg a week — gradual, barely noticeable"],
+                 [0.5, "0.5 kg a week — steady, the usual choice"],
+                 [0.75, "0.75 kg a week — demanding, harder to stick to"]].map(([v, l]) => html`
+                <button class="opt" key=${v} data-on=${f.weeklyLoss === v ? "1" : "0"}
+                  onClick=${() => setF({ ...f, weeklyLoss: v })}>${l}</button>`)}
+            </div>
+          </div>`}
+
+        ${i === 4 && T && html`
+          <div>
+            ${Head("Here's your plan", "Worked out with Mifflin-St Jeor, the same equation most dietitians start from.")}
+            <div class="card" style="margin-top:18px">
+              ${[["Resting burn", T.bmr + " cal"], ["Daily burn", T.tdee + " cal"], ["Eat each day", T.kcal + " cal"],
+                 ["Protein", T.protein + " g"], ["Fat", T.fat + " g"], ["Carbs", T.carbs + " g"]].map(([k, v], n) => html`
+                <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                  padding: "11px 0", borderBottom: n === 5 ? "none" : "1px solid #F0F2ED" }}>
+                  <span class="note" style="font-weight:500">${k}</span>
+                  <span class="d" style=${{ fontWeight: 700, fontSize: (n === 2 ? 21 : 16) + "px" }}>${v}</span>
+                </div>`)}
+            </div>
+            ${atFloor && html`
+              <div class="warn">
+                Your target has been held at the floor of ${f.sex === "female" ? 1200 : 1500} calories. tally won't
+                go below that, so you'll lose a little slower than the pace you picked. That's deliberate.
+              </div>`}
+            <div style="margin-top:18px">
+              <label class="lab">Access code</label>
+              <input class="in" type="password" placeholder="The code you were sent" value=${f.pass} onInput=${set("pass")} />
+              <div class="obs" style="font-size:12.5px;margin-top:8px">
+                Whoever shared tally with you will have sent a code. It lets the app read your photos and
+                costs them a little each time, which is why it's not open to everyone. You can add it later if you don't have it yet.
+              </div>
+            </div>
+            <div class="obs" style="font-size:12.5px;margin-top:16px">
+              These are estimates, not medical advice. If you're pregnant, managing a health condition, or
+              have a history of disordered eating, talk to a doctor before following a calorie target.
+            </div>
+          </div>`}
+      </div>
+
+      <div style="display:flex;gap:9px;margin-top:26px">
+        ${i > 0 && html`<button class="b b2" style="width:auto;padding:15px 22px" onClick=${() => setI(i - 1)}>Back</button>`}
+        ${i < 4
+          ? html`<button class="b" onClick=${() => setI(i + 1)} disabled=${!okStep || tooYoung}>Continue</button>`
+          : html`<button class="b b3" onClick=${finish}>Start tracking</button>`}
+      </div>
     </div>`;
 }
 
@@ -1045,6 +1243,17 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
           <div><label class="lab">Age</label>
             <input class="in" type="number" value=${p.age} onInput=${(e) => setP({ ...p, age: parseInt(e.target.value || "0", 10) || p.age })} /></div>
         </div>
+        <div style="margin-top:13px">
+          <label class="lab">Which does the formula fit better?</label>
+          <select class="in" value=${p.sex} onChange=${(e) => setP({ ...p, sex: e.target.value })}>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </div>
+        ${p.goalWeight < minHealthyKg(p.heightCm) && html`
+          <div class="warn">
+            ${p.goalWeight + " kg is below the healthy range for " + p.heightCm + " cm, which starts around " + minHealthyKg(p.heightCm) + " kg. Worth raising with a doctor."}
+          </div>`}
         <button class="b b3" style="margin-top:17px" disabled=${!dirty} onClick=${() => onSave(p)}>${dirty ? "Save plan" : "Saved"}</button>
       </div>
 

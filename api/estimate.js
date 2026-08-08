@@ -13,8 +13,14 @@ export default async function handler(req, res) {
     return;
   }
 
-  const passcode = process.env.APP_PASSCODE;
-  if (passcode && req.headers["x-tally-pass"] !== passcode) {
+  /* APP_PASSCODE may hold one code or several, comma separated:
+       APP_PASSCODE="justin-4821,mum-9077,sara-3310"
+     Give each tester their own so one can be revoked without disturbing
+     the rest. A single value still works exactly as before. */
+  const allowed = (process.env.APP_PASSCODE || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const given = req.headers["x-tally-pass"];
+  if (allowed.length && !allowed.includes(given)) {
     res.status(401).json({ error: "Bad passcode" });
     return;
   }
