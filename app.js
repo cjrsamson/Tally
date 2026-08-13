@@ -44,11 +44,443 @@ const todayKey = (d = new Date()) => {
   const x = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return x.toISOString().slice(0, 10);
 };
+/* ============================ language ============================ */
+
+const LANGS = [{ id: "en", label: "English" }, { id: "uk", label: "Українська" }];
+const LANG_KEY = "tally.lang";
+let LANG = "en";
+
+/* Falls back to the phone's own language on a fresh install, so someone
+   whose iPhone is in Ukrainian never has to find the setting first. */
+const detectLang = () => {
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved && LANGS.some((l) => l.id === saved)) return saved;
+  } catch {}
+  const nav = ((navigator.languages && navigator.languages[0]) || navigator.language || "").toLowerCase();
+  return nav.startsWith("uk") ? "uk" : "en";
+};
+
+function setLang(l) {
+  LANG = LANGS.some((x) => x.id === l) ? l : "en";
+  try { localStorage.setItem(LANG_KEY, LANG); } catch {}
+  if (typeof document !== "undefined") document.documentElement.lang = LANG;
+}
+
+/* Weekday names, month names and times come from the platform, so they
+   need the locale as well — a Ukrainian screen with English weekday
+   abbreviations reads like a half-finished job. */
+const LOCALE = () => (LANG === "uk" ? "uk-UA" : undefined);
+
+/* Ukrainian chooses between three forms depending on the number, where
+   English only ever needs two: 1 день, 2 дні, 5 днів. */
+function plural(n, forms) {
+  if (LANG === "uk") {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return forms[2];
+    if (b === 1) return forms[0];
+    if (b >= 2 && b <= 4) return forms[1];
+    return forms[2];
+  }
+  return n === 1 ? forms[0] : forms[1];
+}
+
+/* Any missing Ukrainian key falls through to English rather than showing
+   a raw key, so a gap degrades into a readable screen. */
+function t(key, vars) {
+  let s = (STR[LANG] || STR.en)[key];
+  if (s === undefined) s = STR.en[key];
+  if (s === undefined) return key;
+  if (Array.isArray(s)) return s;
+  if (vars) for (const k in vars) s = s.split("{" + k + "}").join(vars[k]);
+  return s;
+}
+const tp = (key, n) => plural(n, t(key));
+
+/* Decimal separator for displayed numbers. Inputs stay type="number" and
+   are handled by the browser. */
+const dec = (n, places = 1) => {
+  const s = Number(n).toFixed(places);
+  return LANG === "uk" ? s.replace(".", ",") : s;
+};
+
+const STR = {
+  en: {
+    /* — language and appearance — */
+    lang_h: "Language",
+    lang_note: "Meal names and the advice tally writes back come out in the language you pick here.",
+    appearance_h: "Appearance",
+    appearance_note: "Left on Automatic, tally follows whatever your phone is set to and switches with it.",
+    theme_system: "Automatic", theme_light: "Light", theme_dark: "Dark",
+
+    /* — activity and meal slots — */
+    act_sedentary: "Mostly at a desk",
+    act_light: "Light — walking, a session or two",
+    act_moderate: "Moderate — tennis 3 to 4 times a week",
+    act_active: "Active — training most days",
+    slot_Breakfast: "Breakfast", slot_Lunch: "Lunch", slot_Dinner: "Dinner", slot_Snack: "Snack",
+
+    /* — confidence and verdict — */
+    conf_high: "Clear read", conf_medium: "Rough estimate",
+    conf_low: "Hard to judge", conf_repeat: "Repeated from an earlier day",
+    conf_likely: "likely {low}–{high} cal",
+    v_fits: "Go for it", v_tight: "Cutting it fine", v_over: "Puts you over",
+
+    /* — units — */
+    u_cal: "cal", u_g: "g", u_kg: "kg",
+    m_cal: "Cal", m_protein: "Protein", m_carbs: "Carbs",
+    m_fat: "Fat", m_sugar: "Sugar", m_fibre: "Fibre",
+    macro_eaten: "{name} eaten",
+    days: ["day", "days"], meals: ["meal", "meals"],
+    dayw: ["day", "days"], weighins: ["weigh-in", "weigh-ins"],
+
+    /* — home — */
+    loading: "Loading…",
+    greet_morning: "Good morning", greet_afternoon: "Good afternoon", greet_evening: "Good evening",
+    greet_named: "{greet}, {name}",
+    bday: "Happy birthday", bday_named: "Happy birthday, {name}",
+    sub_pastday: "{date} · {eaten} of {target}. Tap + to add to this day.",
+    sub_empty: "Nothing logged yet today. {n} calories to play with.",
+    sub_over: "{n} over budget today.",
+    sub_left: "{n} calories left for today.",
+    week_this: "This week", week_return: "back to today",
+    week_prev: "Previous week", week_next: "Next week",
+    cal_eaten: "Calories eaten", cal_over: "{n} over budget", cal_left: "{n} left",
+    carbs_h: "Carbs, in more detail", carbs_total: "{n}g total",
+    ofwhich_fibre: "Of which fibre", ofwhich_sugar: "Of which sugar",
+    fibre_sub: "Aim to reach this",
+    sugar_sub: "Try to stay under", sugar_over: "Over the daily guide",
+    carbs_note: "Fibre is the part of a carb that feeds you slowly — hitting it is what makes a carb a good one. Sugar counts what's in fruit and milk as well as what's added, so a day of whole fruit can read high and still be fine.",
+    recent_h: "Recently logged",
+    empty_h: "Nothing logged yet",
+    empty_s: "Tap + to snap a plate, pick a photo, or just describe what you're having.",
+    nav_home: "Home", nav_progress: "Progress", nav_profile: "Profile",
+    aria_add: "Add a meal",
+
+    /* — numbers grid and ingredients — */
+    num_note: "Adjust protein, carbs or fat and the calories recalculate themselves. Sugar and fibre are counted inside the carb figure, not on top of it.",
+    ing_h: "What's in it", ing_tap: "Tap any line to correct it",
+    ing_add: "+ Add something it missed",
+    ing_name_ph: "Ingredient, e.g. olive oil",
+    ing_amt_ph: "120", ing_unit_ph: "g, cups, slices", ing_cal_ph: "cal",
+    ing_scales: "Change the amount and the calories follow it.",
+    ing_blank: "Leave the calories blank and tally can work them out.",
+    ing_lookup: "✦ Work out the calories", ing_looking: "Looking up",
+    ing_addit: "Add it", ing_done: "Done", ing_remove: "Remove", ing_cancel: "Cancel",
+    ing_untitled: "Untitled",
+    ing_breakdown: "{p}g protein · {c}g carbs · {f}g fat · {s}g sugar · {fb}g fibre",
+    ing_err_pass: "Passcode needed before it can look that up.",
+    ing_err: "Couldn't look that one up. Type the calories in instead.",
+
+    /* — onboarding — */
+    ob_welcome_h: "Welcome to tally",
+    ob_welcome_s: "A calorie tracker you can point at your food. First, a few questions so the numbers are yours and not someone else's.",
+    ob_name_l: "What should it call you?", ob_name_ph: "First name",
+    ob_private: "Everything you log stays on this phone. Nothing is uploaded, and nobody else can see it — not even the person who shared this with you.",
+    ob_about_h: "About you",
+    ob_about_s: "Your date of birth, height and sex go into the equation that estimates what your body burns at rest.",
+    ob_dob_l: "Date of birth",
+    ob_dob_note: "tally works your age out from this, so it stays right as the years pass.",
+    ob_dob_age: "That makes you {age}. Your target will adjust itself on your birthday.",
+    ob_height_l: "Height (cm)",
+    ob_sex_l: "Which does the formula fit better?", ob_male: "Male", ob_female: "Female",
+    ob_young_h: "tally isn't built for under 18s.",
+    ob_young_s: "The equation it uses is for adult bodies, and calorie targets for someone still growing are something a doctor should set — not an app. If you'd like help with eating well, a GP or a school nurse is the right place to start.",
+    ob_weight_h: "Where you are, where you're heading",
+    ob_weight_s: "Weigh yourself in the morning if you can — it's the most consistent time.",
+    ob_now_l: "Weight now (kg)", ob_goal_l: "Goal (kg)",
+    ob_goal_high: "tally is set up for losing weight, so your goal needs to be below where you are now.",
+    ob_lean: "You're already at the lean end of the healthy range for your height. Losing more isn't something to take on without talking to a doctor first.",
+    ob_goal_low: "{goal} kg is below the healthy weight range for {cm} cm — that range starts around {floor} kg. You can carry on, but it's worth a conversation with a doctor before aiming there.",
+    ob_move_h: "How much do you move?",
+    ob_move_s: "Be honest rather than optimistic — an overestimate here inflates your budget every single day.",
+    ob_pace_l: "How fast do you want it to come off?",
+    ob_pace_25: "0.25 kg a week — gradual, barely noticeable",
+    ob_pace_50: "0.5 kg a week — steady, the usual choice",
+    ob_pace_75: "0.75 kg a week — demanding, harder to stick to",
+    ob_plan_h: "Here's your plan",
+    ob_plan_s: "Worked out with Mifflin-St Jeor, the same equation most dietitians start from.",
+    plan_bmr: "Resting burn", plan_tdee: "Daily burn", plan_eat: "Eat each day",
+    plan_fibre: "— of which fibre, at least", plan_sugar: "— of which sugar, at most",
+    ob_floor: "Your target has been held at the floor of {n} calories. tally won't go below that, so you'll lose a little slower than the pace you picked. That's deliberate.",
+    ob_code_l: "Access code", ob_code_ph: "The code you were sent",
+    ob_code_note: "Whoever shared tally with you will have sent a code. It lets the app read your photos and costs them a little each time, which is why it's not open to everyone. You can add it later if you don't have it yet.",
+    ob_medical: "These are estimates, not medical advice. If you're pregnant, managing a health condition, or have a history of disordered eating, talk to a doctor before following a calorie target.",
+    ob_back: "Back", ob_continue: "Continue", ob_start: "Start tracking",
+
+    /* — passcode — */
+    pass_h: "Enter your passcode",
+    pass_note: "This is the passcode you set on the server when you deployed. It stops anyone else who finds this address from spending your API credit.",
+    pass_save: "Save passcode",
+
+    /* — log sheet — */
+    log_h: "What are you having?",
+    log_forday: "This will be logged to {day}.",
+    log_snap_t: "Snap the plate", log_snap_s: "Straight to the camera",
+    log_pick_t: "Choose a photo", log_pick_s: "From your camera roll",
+    log_type_t: "Just describe it", log_type_s: "No photo needed",
+    log_again_t: "Had it before", log_again_s: "Copy a meal from yesterday or earlier",
+    rep_h: "Something you've had before", rep_back: "Back",
+    rep_note: "Tap a meal to log it again — you can change the portion first. \"Add all\" puts a whole day back in one go.",
+    rep_all: "Add all: {n}", rep_yesterday: "Yesterday",
+    log_ph_label: "How much of it are you having?",
+    log_ph_photo: "Anything it can't see? Optional",
+    log_ph_text: "Chicken machboos with rice",
+    log_isfood: "🍽️ It's food", log_islabel: "🏷️ It's a label",
+    log_run: "Work out the calories", log_running: "Working it out",
+    log_err_pass: "Passcode needed before it can estimate.",
+    log_err: "That didn't come back. Try again, or type the numbers in yourself.",
+    log_notimage: "That isn't an image.",
+    log_badphoto: "Couldn't read that photo. Try another.",
+    v_over_by: " by {n}",
+    v_line: "{name}, about",
+    v_line2: "That would put you at {done} of {budget}",
+    v_left: ", with {n} left for the day.",
+    v_stop: ".",
+    v_protein: "Strong on protein: {n}g of the {need}g you still need.",
+    v_basis: "Judged against {basis}.",
+    log_when: "When was this?",
+    log_it: "Log it · {n} cal",
+    log_justchecking: "Just checking — don't log it",
+    log_restart: "Start again",
+    meal_default: "Meal",
+
+    /* — meal detail — */
+    md_calories: "Calories",
+    md_numbers: "The numbers, per serving × {n}",
+    md_doneedit: "Done editing", md_edit: "✎ Edit these numbers",
+    md_fix_l: "Tell it what's wrong",
+    md_fix_ph: "No dressing, and the portion was double",
+    md_fix_note: "Best for whole-dish corrections. For one item, tap it in the list above.",
+    md_fix_go: "Update the estimate", md_fixing: "Recalculating",
+    md_cancel: "Cancel", md_redo: "✦ Redo the whole thing", md_done: "Done",
+    md_delete: "Delete this meal",
+    md_err_pass: "Passcode needed.",
+    md_err: "Couldn't revise it. Try again, or edit the numbers by hand.",
+
+    /* — progress — */
+    pr_weight: "Your weight",
+    pr_goal: "Goal {kg} kg · {pct}%",
+    pr_streak: "{n} {unit}", pr_streak_s: "logged in a row",
+    pr_chart_h: "Weight progress", pr_ofgoal: "⚑ {pct}% of goal",
+    pr_needmore: "Log your weight twice and the trend line appears here.",
+    pr_weigh_ph: "Weigh in, kg", pr_log: "Log",
+    pr_avg_h: "Daily average calories", pr_vs: "vs last week",
+    pr_dashed: "Dashed line is your {n} budget. Judge yourself on the week, not the day.",
+
+    /* — profile — */
+    pf_plan_h: "Your plan",
+    pf_name_l: "What should it call you?", pf_name_ph: "Your first name",
+    pf_move_l: "How much you move",
+    pf_pace_l: "Pace",
+    pf_pace_25: "0.25 kg a week — gradual", pf_pace_50: "0.5 kg a week — steady",
+    pf_pace_75: "0.75 kg a week — demanding",
+    pf_goal_l: "Goal kg", pf_stretch_l: "Stretch kg", pf_height_l: "Height cm",
+    pf_dob_l: "Date of birth",
+    pf_dob_set: "You're {age}. tally recalculates this itself, so your target moves on your birthday.",
+    pf_dob_unset: "Set this and tally will keep your age up to date on its own. Until then it's using {age}.",
+    pf_low: "{goal} kg is below the healthy range for {cm} cm, which starts around {floor} kg. Worth raising with a doctor.",
+    pf_save: "Save plan", pf_saved: "Saved",
+    pf_numbers_h: "Your numbers",
+    pf_numbers_note: "Protein protects muscle while the weight comes off. Hit it first and let carbs and fat move around it. The plan never drops below 1,500 calories.",
+    pf_data_h: "Your data",
+    pf_data_note: "Everything lives on this phone. Nothing is stored on the server. Export a backup before you clear your browser data or change device.",
+    pf_export: "Export a backup", pf_restore: "Restore from a backup",
+    pf_restore_h: "Restore this backup?",
+    pf_restore_s: "It holds {meals}, across {days} and {weighins}. Anything already on this phone stays — the two are merged.",
+    pf_merge: "Merge it in", pf_cancel: "Cancel",
+    pf_restored: "Restored {n}.",
+    pf_notbackup: "That doesn't look like a tally backup.",
+    pf_badfile: "Couldn't read that file. Make sure it's the .json backup.",
+    pf_changepass: "Change passcode",
+    pf_erase: "Erase all data", pf_erase_yes: "Yes, erase everything",
+  },
+
+  uk: {
+    lang_h: "Мова",
+    lang_note: "Назви страв і поради, які пише tally, будуть тією мовою, яку ви оберете тут.",
+    appearance_h: "Оформлення",
+    appearance_note: "У режимі «Автоматично» tally бере налаштування вашого телефона і змінюється разом із ним.",
+    theme_system: "Автоматично", theme_light: "Світла", theme_dark: "Темна",
+
+    act_sedentary: "Переважно сидяча робота",
+    act_light: "Легка — прогулянки, одне-два тренування",
+    act_moderate: "Помірна — тренування 3–4 рази на тиждень",
+    act_active: "Активна — тренування майже щодня",
+    slot_Breakfast: "Сніданок", slot_Lunch: "Обід", slot_Dinner: "Вечеря", slot_Snack: "Перекус",
+
+    conf_high: "Добре видно", conf_medium: "Приблизна оцінка",
+    conf_low: "Важко визначити", conf_repeat: "Повтор із попереднього дня",
+    conf_likely: "імовірно {low}–{high} ккал",
+    v_fits: "Можна сміливо", v_tight: "Майже впритул", v_over: "Виходить за межу",
+
+    u_cal: "ккал", u_g: "г", u_kg: "кг",
+    m_cal: "Ккал", m_protein: "Білки", m_carbs: "Вуглеводи",
+    m_fat: "Жири", m_sugar: "Цукор", m_fibre: "Клітковина",
+    macro_eaten: "{name} спожито",
+    days: ["день", "дні", "днів"], meals: ["страва", "страви", "страв"],
+    dayw: ["день", "дні", "днів"], weighins: ["зважування", "зважування", "зважувань"],
+
+    loading: "Завантаження…",
+    greet_morning: "Доброго ранку", greet_afternoon: "Доброго дня", greet_evening: "Доброго вечора",
+    greet_named: "{greet}, {name}",
+    bday: "З днем народження", bday_named: "З днем народження, {name}",
+    sub_pastday: "{date} · {eaten} з {target}. Натисніть +, щоб додати до цього дня.",
+    sub_empty: "Сьогодні ще нічого не записано. У вас {n} ккал на день.",
+    sub_over: "Сьогодні перевищення на {n} ккал.",
+    sub_left: "Залишилось {n} ккал на сьогодні.",
+    week_this: "Цей тиждень", week_return: "до сьогодні",
+    week_prev: "Попередній тиждень", week_next: "Наступний тиждень",
+    cal_eaten: "Спожито калорій", cal_over: "перевищення на {n}", cal_left: "залишилось {n}",
+    carbs_h: "Вуглеводи докладніше", carbs_total: "усього {n} г",
+    ofwhich_fibre: "З них клітковина", ofwhich_sugar: "З них цукор",
+    fibre_sub: "Бажано дійти до цієї межі",
+    sugar_sub: "Бажано не перевищувати", sugar_over: "Більше за денний орієнтир",
+    carbs_note: "Клітковина — та частина вуглеводів, що засвоюється повільно; саме вона робить вуглеводи корисними. У цукор рахується і той, що природно є у фруктах та молоці, тому день із великою кількістю фруктів може показати багато цукру — і це нормально.",
+    recent_h: "Останні записи",
+    empty_h: "Ще нічого не записано",
+    empty_s: "Натисніть +, щоб сфотографувати тарілку, вибрати фото або просто описати страву словами.",
+    nav_home: "Головна", nav_progress: "Прогрес", nav_profile: "Профіль",
+    aria_add: "Додати страву",
+
+    num_note: "Змініть білки, вуглеводи або жири — і калорії перерахуються самі. Цукор і клітковина входять до вуглеводів, а не додаються до них.",
+    ing_h: "Що всередині", ing_tap: "Натисніть на рядок, щоб виправити",
+    ing_add: "+ Додати те, чого бракує",
+    ing_name_ph: "Інгредієнт, напр. оливкова олія",
+    ing_amt_ph: "120", ing_unit_ph: "г, склянки, скибки", ing_cal_ph: "ккал",
+    ing_scales: "Змініть кількість — і калорії зміняться слідом.",
+    ing_blank: "Залиште поле калорій порожнім, і tally порахує сам.",
+    ing_lookup: "✦ Порахувати калорії", ing_looking: "Шукаю",
+    ing_addit: "Додати", ing_done: "Готово", ing_remove: "Прибрати", ing_cancel: "Скасувати",
+    ing_untitled: "Без назви",
+    ing_breakdown: "{p} г білків · {c} г вуглеводів · {f} г жирів · {s} г цукру · {fb} г клітковини",
+    ing_err_pass: "Щоб це порахувати, потрібен код доступу.",
+    ing_err: "Не вдалося знайти. Введіть калорії вручну.",
+
+    ob_welcome_h: "Вітаємо у tally",
+    ob_welcome_s: "Лічильник калорій, який досить навести на їжу. Спершу кілька запитань, щоб цифри були саме вашими.",
+    ob_name_l: "Як до вас звертатися?", ob_name_ph: "Ім'я",
+    ob_private: "Усе, що ви записуєте, лишається на цьому телефоні. Нічого не надсилається на сервер, і ніхто інший цього не бачить — навіть той, хто поділився з вами застосунком.",
+    ob_about_h: "Про вас",
+    ob_about_s: "Дата народження, зріст і стать потрібні для формули, що оцінює, скільки ваше тіло витрачає у спокої.",
+    ob_dob_l: "Дата народження",
+    ob_dob_note: "tally сам рахує ваш вік із цієї дати, тож він завжди буде правильний.",
+    ob_dob_age: "Отже, вам {age}. Ваша норма оновиться у день народження.",
+    ob_height_l: "Зріст (см)",
+    ob_sex_l: "Яка формула вам підходить?", ob_male: "Чоловіча", ob_female: "Жіноча",
+    ob_young_h: "tally не призначений для осіб до 18 років.",
+    ob_young_s: "Формула розрахована на доросле тіло, а норму калорій для того, хто ще росте, має визначати лікар, а не застосунок. Якщо потрібна допомога з харчуванням, почніть із сімейного лікаря.",
+    ob_weight_h: "Де ви зараз і куди прямуєте",
+    ob_weight_s: "Зважуйтеся вранці, якщо є така змога — це найстабільніший час.",
+    ob_now_l: "Вага зараз (кг)", ob_goal_l: "Ціль (кг)",
+    ob_goal_high: "tally налаштований на зниження ваги, тому ціль має бути меншою за теперішню вагу.",
+    ob_lean: "Ви вже у нижній частині здорового діапазону для свого зросту. Худнути далі варто лише після розмови з лікарем.",
+    ob_goal_low: "{goal} кг — це нижче за здоровий діапазон для зросту {cm} см; він починається приблизно з {floor} кг. Ви можете продовжити, але спершу варто порадитися з лікарем.",
+    ob_move_h: "Наскільки ви рухаєтеся?",
+    ob_move_s: "Оцініть чесно, а не оптимістично — завищена оцінка щодня збільшуватиме вашу норму.",
+    ob_pace_l: "Як швидко хочете худнути?",
+    ob_pace_25: "0,25 кг на тиждень — поступово, майже непомітно",
+    ob_pace_50: "0,5 кг на тиждень — рівно, звичайний вибір",
+    ob_pace_75: "0,75 кг на тиждень — вимогливо, важче витримати",
+    ob_plan_h: "Ось ваш план",
+    ob_plan_s: "Розраховано за формулою Міффліна-Сан Жеора, з якої починає більшість дієтологів.",
+    plan_bmr: "Витрати у спокої", plan_tdee: "Витрати за день", plan_eat: "Їсти щодня",
+    plan_fibre: "— з них клітковини, щонайменше", plan_sugar: "— з них цукру, не більше",
+    ob_floor: "Вашу норму зупинено на нижній межі — {n} ккал. tally не опускається нижче, тож ви худнутимете трохи повільніше за обраний темп. Так і задумано.",
+    ob_code_l: "Код доступу", ob_code_ph: "Код, який вам надіслали",
+    ob_code_note: "Той, хто поділився з вами tally, мав надіслати код. Він дозволяє застосунку розпізнавати ваші фото і щоразу трохи коштує власнику — тому доступ не відкритий для всіх. Код можна ввести й пізніше.",
+    ob_medical: "Це оцінки, а не медичні поради. Якщо ви вагітні, маєте хронічне захворювання або в минулому були розлади харчової поведінки, порадьтеся з лікарем, перш ніж дотримуватися норми калорій.",
+    ob_back: "Назад", ob_continue: "Далі", ob_start: "Почати",
+
+    pass_h: "Введіть код доступу",
+    pass_note: "Це код, який ви задали на сервері під час розгортання. Він не дає стороннім витрачати ваш ліміт API.",
+    pass_save: "Зберегти код",
+
+    log_h: "Що ви їсте?",
+    log_forday: "Запис буде додано до дня: {day}.",
+    log_snap_t: "Сфотографувати", log_snap_s: "Одразу камера",
+    log_pick_t: "Вибрати фото", log_pick_s: "З галереї",
+    log_type_t: "Просто описати", log_type_s: "Фото не потрібне",
+    log_again_t: "Уже це їли", log_again_s: "Скопіювати страву з учора або раніше",
+    rep_h: "Те, що ви вже їли", rep_back: "Назад",
+    rep_note: "Натисніть на страву, щоб записати її знову — порцію можна змінити. «Додати всі» повертає цілий день одним дотиком.",
+    rep_all: "Додати всі: {n}", rep_yesterday: "Учора",
+    log_ph_label: "Скільки ви з'їсте?",
+    log_ph_photo: "Щось, чого не видно на фото? Необов'язково",
+    log_ph_text: "Курка з рисом",
+    log_isfood: "🍽️ Це їжа", log_islabel: "🏷️ Це етикетка",
+    log_run: "Порахувати калорії", log_running: "Рахую",
+    log_err_pass: "Щоб зробити оцінку, потрібен код доступу.",
+    log_err: "Відповідь не надійшла. Спробуйте ще раз або введіть цифри вручну.",
+    log_notimage: "Це не зображення.",
+    log_badphoto: "Не вдалося прочитати це фото. Спробуйте інше.",
+    v_over_by: " на {n}",
+    v_line: "{name}, приблизно",
+    v_line2: "Разом вийде {done} з {budget}",
+    v_left: ", залишиться {n} на день.",
+    v_stop: ".",
+    v_protein: "Багато білка: {n} г із {need} г, яких вам ще бракує.",
+    v_basis: "Оцінено за орієнтиром: {basis}.",
+    log_when: "Коли це було?",
+    log_it: "Записати · {n} ккал",
+    log_justchecking: "Просто дивлюся — не записувати",
+    log_restart: "Почати спочатку",
+    meal_default: "Страва",
+
+    md_calories: "Калорії",
+    md_numbers: "Цифри, порція × {n}",
+    md_doneedit: "Готово", md_edit: "✎ Змінити цифри",
+    md_fix_l: "Що не так?",
+    md_fix_ph: "Без заправки, і порція була подвійна",
+    md_fix_note: "Підходить для виправлень щодо всієї страви. Щоб змінити один інгредієнт, натисніть на нього у списку вище.",
+    md_fix_go: "Оновити оцінку", md_fixing: "Перераховую",
+    md_cancel: "Скасувати", md_redo: "✦ Перерахувати заново", md_done: "Готово",
+    md_delete: "Видалити цю страву",
+    md_err_pass: "Потрібен код доступу.",
+    md_err: "Не вдалося перерахувати. Спробуйте ще раз або змініть цифри вручну.",
+
+    pr_weight: "Ваша вага",
+    pr_goal: "Ціль {kg} кг · {pct}%",
+    pr_streak: "{n} {unit}", pr_streak_s: "поспіль із записами",
+    pr_chart_h: "Зміна ваги", pr_ofgoal: "⚑ {pct}% до цілі",
+    pr_needmore: "Запишіть вагу двічі — і тут з'явиться лінія тренду.",
+    pr_weigh_ph: "Зважування, кг", pr_log: "Записати",
+    pr_avg_h: "Середні калорії за день", pr_vs: "проти минулого тижня",
+    pr_dashed: "Пунктир — ваша норма {n} ккал. Оцінюйте себе за тижнем, а не за одним днем.",
+
+    pf_plan_h: "Ваш план",
+    pf_name_l: "Як до вас звертатися?", pf_name_ph: "Ваше ім'я",
+    pf_move_l: "Скільки ви рухаєтеся",
+    pf_pace_l: "Темп",
+    pf_pace_25: "0,25 кг на тиждень — поступово", pf_pace_50: "0,5 кг на тиждень — рівно",
+    pf_pace_75: "0,75 кг на тиждень — вимогливо",
+    pf_goal_l: "Ціль, кг", pf_stretch_l: "Бажана, кг", pf_height_l: "Зріст, см",
+    pf_dob_l: "Дата народження",
+    pf_dob_set: "Вам {age}. tally рахує це сам, тож норма оновиться у ваш день народження.",
+    pf_dob_unset: "Вкажіть дату, і tally сам оновлюватиме ваш вік. Поки що використовується {age}.",
+    pf_low: "{goal} кг — нижче за здоровий діапазон для зросту {cm} см, який починається приблизно з {floor} кг. Варто обговорити з лікарем.",
+    pf_save: "Зберегти план", pf_saved: "Збережено",
+    pf_numbers_h: "Ваші цифри",
+    pf_numbers_note: "Білок зберігає м'язи, поки йде вага. Тримайте його насамперед, а вуглеводи та жири підлаштовуйте навколо нього. План ніколи не опускається нижче 1500 ккал.",
+    pf_data_h: "Ваші дані",
+    pf_data_note: "Усе зберігається на цьому телефоні. На сервері нічого немає. Зробіть резервну копію, перш ніж очищати дані браузера або міняти телефон.",
+    pf_export: "Зберегти резервну копію", pf_restore: "Відновити з копії",
+    pf_restore_h: "Відновити цю копію?",
+    pf_restore_s: "У ній {meals} за {days} і {weighins}. Усе, що вже є на цьому телефоні, залишиться — дані об'єднаються.",
+    pf_merge: "Об'єднати", pf_cancel: "Скасувати",
+    pf_restored: "Відновлено: {n}.",
+    pf_notbackup: "Це не схоже на резервну копію tally.",
+    pf_badfile: "Не вдалося прочитати файл. Переконайтеся, що це резервна копія .json.",
+    pf_changepass: "Змінити код доступу",
+    pf_erase: "Стерти всі дані", pf_erase_yes: "Так, стерти все",
+  },
+};
+
 const ACTIVITY = [
-  { id: "sedentary", label: "Mostly at a desk", mult: 1.2 },
-  { id: "light", label: "Light — walking, a session or two", mult: 1.375 },
-  { id: "moderate", label: "Moderate — tennis 3 to 4 times a week", mult: 1.55 },
-  { id: "active", label: "Active — training most days", mult: 1.725 },
+  { id: "sedentary", key: "act_sedentary", mult: 1.2 },
+  { id: "light", key: "act_light", mult: 1.375 },
+  { id: "moderate", key: "act_moderate", mult: 1.55 },
+  { id: "active", key: "act_active", mult: 1.725 },
 ];
 const SLOTS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 const SLOT_ICON = { Breakfast: "🍳", Lunch: "🥗", Dinner: "🍽️", Snack: "🍎" };
@@ -56,7 +488,7 @@ const DEFAULTS = {
   onboarded: false,
   name: "", heightCm: 170, dob: "", age: 30, sex: "male", startWeight: 75,
   goalWeight: 72, stretchWeight: 70, activity: "light", weeklyLoss: 0.5,
-  theme: "system",
+  theme: "system", lang: "en",
 };
 
 /* ---------------------------------------------------------------- theme */
@@ -185,6 +617,14 @@ const setPass = (v) => { try { localStorage.setItem(PASS_KEY, v); } catch {} };
 /* The rules that stop it inventing food that isn't on the plate. Sent as a
    system prompt rather than buried in the user turn — it is followed far
    more consistently there. */
+/* The model has to be told which language to write in, or a Ukrainian
+   screen fills up with English dish names and advice. This covers only the
+   free-text fields — the JSON keys stay English so parsing is unaffected. */
+const langRule = () =>
+  LANG === "uk"
+    ? ` Write every human-readable value — the dish name, the ingredient names, the portion descriptions, the basis, the note and the advice — in Ukrainian. Use Ukrainian food names as a Ukrainian speaker would say them. Keep the JSON keys themselves in English exactly as specified.`
+    : "";
+
 const SYSTEM = `You are the nutrition estimator inside a personal calorie tracker. You reply with JSON only — no prose, no markdown fences.
 
 Reading a photograph:
@@ -210,7 +650,9 @@ async function askClaude(content, system) {
   const r = await fetch("/api/estimate", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-tally-pass": getPass() },
-    body: JSON.stringify({ content, system: system || SYSTEM }),
+    /* Appended per call rather than baked into SYSTEM, because the language
+       can change between one estimate and the next. */
+    body: JSON.stringify({ content, system: (system || SYSTEM) + langRule() }),
   });
   if (r.status === 401) { const e = new Error("auth"); e.auth = true; throw e; }
   if (!r.ok) throw new Error("api " + r.status);
@@ -266,12 +708,12 @@ function Ring({ size, stroke, pct, color, track = "var(--track)", children }) {
 /* ============================ confidence chip ============================ */
 
 const CONF = {
-  high: { bg: "var(--okBg)", fg: "var(--okFg)", label: "Clear read" },
-  medium: { bg: "var(--warnBg)", fg: "var(--warnFg)", label: "Rough estimate" },
-  low: { bg: "var(--stopBg)", fg: "var(--stopFg)", label: "Hard to judge" },
+  high: { bg: "var(--okBg)", fg: "var(--okFg)", key: "conf_high" },
+  medium: { bg: "var(--warnBg)", fg: "var(--warnFg)", key: "conf_medium" },
+  low: { bg: "var(--stopBg)", fg: "var(--stopFg)", key: "conf_low" },
   /* Not a model output — set when a meal is copied from an earlier day, so
      the chip doesn't claim a fresh reading it never made. */
-  repeat: { bg: "var(--track)", fg: "var(--ink)", label: "Repeated from an earlier day" },
+  repeat: { bg: "var(--track)", fg: "var(--ink)", key: "conf_repeat" },
 };
 
 function Confidence({ level, low, high, servings = 1 }) {
@@ -279,9 +721,9 @@ function Confidence({ level, low, high, servings = 1 }) {
   const spread = low && high && high > low;
   return html`
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px">
-      <span class="conf" style=${{ background: c.bg, color: c.fg }}>${c.label}</span>
+      <span class="conf" style=${{ background: c.bg, color: c.fg }}>${t(c.key)}</span>
       ${spread && html`<span class="note" style="font-size:12px">
-        likely ${Math.round(low * servings)}–${Math.round(high * servings)} cal
+        ${t("conf_likely", { low: Math.round(low * servings), high: Math.round(high * servings) })}
       </span>`}
     </div>`;
 }
@@ -311,17 +753,13 @@ function CarbDetail({ sum, T }) {
   return html`
     <div class="card">
       <div style="display:flex;align-items:baseline;justify-content:space-between">
-        <div class="h">Carbs, in more detail</div>
-        <span class="note" style="font-size:11.5px">${Math.round(sum.carbs || 0)}g total</span>
+        <div class="h">${t("carbs_h")}</div>
+        <span class="note" style="font-size:11.5px">${t("carbs_total", { n: Math.round(sum.carbs || 0) })}</span>
       </div>
-      ${row("Of which fibre", "Aim to reach this", fibre, T.fibre, fibrePct, "var(--fibre)")}
-      ${row("Of which sugar", sugarOver ? "Over the daily guide" : "Try to stay under", sugar, T.sugar, sugarPct,
+      ${row(t("ofwhich_fibre"), t("fibre_sub"), fibre, T.fibre, fibrePct, "var(--fibre)")}
+      ${row(t("ofwhich_sugar"), t(sugarOver ? "sugar_over" : "sugar_sub"), sugar, T.sugar, sugarPct,
         sugarOver ? "var(--over)" : "var(--sugar)")}
-      <div class="note" style="font-size:11.5px;margin-top:12px">
-        Fibre is the part of a carb that feeds you slowly — hitting it is what makes a carb a good one.
-        Sugar counts what's in fruit and milk as well as what's added, so a day of whole fruit can read high
-        and still be fine.
-      </div>
+      <div class="note" style="font-size:11.5px;margin-top:12px">${t("carbs_note")}</div>
     </div>`;
 }
 
@@ -334,8 +772,7 @@ function CarbDetail({ sum, T }) {
    sugar alcohols, a figure read straight off a packet. */
 function NumberGrid({ base, servings, onBase }) {
   const s = servings || 1;
-  const FIELDS = [["kcal", "Cal"], ["protein", "Protein"], ["carbs", "Carbs"],
-                  ["fat", "Fat"], ["sugar", "Sugar"], ["fibre", "Fibre"]];
+  const FIELDS = ["kcal", "protein", "carbs", "fat", "sugar", "fibre"];
 
   const setField = (k, raw) => {
     const per = Math.max(0, Math.round((parseInt(raw || "0", 10) || 0) / s));
@@ -349,17 +786,14 @@ function NumberGrid({ base, servings, onBase }) {
   return html`
     <div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px">
-        ${FIELDS.map(([k, l]) => html`
+        ${FIELDS.map((k) => html`
           <div key=${k}>
-            <label class="lab">${l}${k === "kcal" ? "" : " (g)"}</label>
+            <label class="lab">${t("m_" + (k === "kcal" ? "cal" : k))}${k === "kcal" ? "" : " (" + t("u_g") + ")"}</label>
             <input class="in" style="padding:12px 6px;border-radius:13px;text-align:center" type="number" inputmode="numeric"
               value=${Math.round((base[k] || 0) * s)} onInput=${(e) => setField(k, e.target.value)} />
           </div>`)}
       </div>
-      <div class="note" style="font-size:11.5px;margin-top:7px">
-        Adjust protein, carbs or fat and the calories recalculate themselves. Sugar and fibre are counted
-        inside the carb figure, not on top of it.
-      </div>
+      <div class="note" style="font-size:11.5px;margin-top:7px">${t("num_note")}</div>
     </div>`;
 }
 
@@ -375,7 +809,7 @@ const splitQty = (q) => {
 const joinQty = (amt, unit) =>
   [String(amt || "").trim(), String(unit || "").trim()].filter(Boolean).join(" ");
 
-const ING_SYSTEM =
+const ING_SYSTEM = () =>
   `You are a nutrition lookup inside a calorie tracker. You reply with JSON only — no prose, no markdown fences. ` +
   `Give figures for the exact amount asked for, not per 100 g and not per portion. ` +
   `Assume the food is prepared the ordinary way, including the oil or butter a kitchen would normally use. ` +
@@ -463,63 +897,61 @@ function IngredientList({ ings, base, servings, onChange, mealName, onNeedPass }
         (mealName ? `, as part of a dish described as "${mealName}"` : "") + `?\n\n` +
         `Reply with ONLY this JSON object:\n` +
         `{"kcal":integer,"protein":integer grams,"carbs":integer grams,"fat":integer grams,` +
-        `"sugar":integer grams,"fibre":integer grams}` }], ING_SYSTEM);
+        `"sugar":integer grams,"fibre":integer grams}` }], ING_SYSTEM());
       const kc = Math.max(0, Math.round(p.kcal || 0));
       const m = MACROS.reduce((a, k) => ({ ...a, [k]: Math.max(0, Math.round(p[k] || 0)) }), {});
       m.sugar = Math.min(m.sugar, m.carbs);
       m.fibre = Math.min(m.fibre, m.carbs);
       setDraft({ ...draft, kcal: String(kc), m, basisKcal: kc, basisM: m, basisAmt: parseFloat(draft.amt) || 0 });
     } catch (e) {
-      if (e && e.auth) { onNeedPass && onNeedPass(); setErr("Passcode needed before it can look that up."); }
-      else setErr("Couldn't look that one up. Type the calories in instead.");
+      if (e && e.auth) { onNeedPass && onNeedPass(); setErr(t("ing_err_pass")); }
+      else setErr(t("ing_err"));
     }
     setBusy(false);
   };
 
   const editor = html`
     <div class="ined">
-      <input class="in2" placeholder="Ingredient, e.g. olive oil" value=${draft && draft.name} autofocus=${adding}
+      <input class="in2" placeholder=${t("ing_name_ph")} value=${draft && draft.name} autofocus=${adding}
         onInput=${(ev) => setDraft({ ...draft, name: ev.target.value })} />
       <div style="display:flex;gap:8px;margin-top:8px">
         <input class="in2" style="flex:1;text-align:center" type="number" step="any" inputmode="decimal"
-          placeholder="120" value=${draft && draft.amt} onInput=${(ev) => setAmt(ev.target.value)} />
-        <input class="in2" style="flex:1.1" placeholder="g, cups, slices" value=${draft && draft.unit}
+          placeholder=${t("ing_amt_ph")} value=${draft && draft.amt} onInput=${(ev) => setAmt(ev.target.value)} />
+        <input class="in2" style="flex:1.1" placeholder=${t("ing_unit_ph")} value=${draft && draft.unit}
           onInput=${(ev) => setDraft({ ...draft, unit: ev.target.value })} />
         <input class="in2" style="flex:1;text-align:center" type="number" inputmode="numeric"
-          placeholder="cal" value=${draft && draft.kcal} onInput=${(ev) => setKcal(ev.target.value)} />
+          placeholder=${t("ing_cal_ph")} value=${draft && draft.kcal} onInput=${(ev) => setKcal(ev.target.value)} />
       </div>
 
       <div class="note" style="font-size:11.5px;margin-top:8px">
-        ${draft && draft.basisAmt > 0 && draft.basisKcal > 0
-          ? "Change the amount and the calories follow it."
-          : "Leave the calories blank and tally can work them out."}
+        ${t(draft && draft.basisAmt > 0 && draft.basisKcal > 0 ? "ing_scales" : "ing_blank")}
       </div>
 
       ${draft && draft.m && html`
         <div class="note" style="font-size:11.5px;margin-top:5px">
-          ${draft.m.protein}g protein · ${draft.m.carbs}g carbs · ${draft.m.fat}g fat · ${draft.m.sugar}g sugar · ${draft.m.fibre}g fibre
+          ${t("ing_breakdown", { p: draft.m.protein, c: draft.m.carbs, f: draft.m.fat, s: draft.m.sugar, fb: draft.m.fibre })}
         </div>`}
 
       ${err && html`<div class="err" style="margin-top:8px">${err}</div>`}
 
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="mini" style="flex:1" disabled=${busy || !(draft && draft.name.trim())} onClick=${lookup}>
-          ${busy ? html`<span class="spin"></span>Looking up` : "✦ Work out the calories"}
+          ${busy ? html`<span class="spin"></span>${t("ing_looking")}` : t("ing_lookup")}
         </button>
         <button class="mini" style=${{ flex: 1, background: "var(--ink)", color: "var(--onInk)", borderColor: "var(--ink)" }}
-          disabled=${busy} onClick=${saveRow}>${adding ? "Add it" : "Done"}</button>
+          disabled=${busy} onClick=${saveRow}>${t(adding ? "ing_addit" : "ing_done")}</button>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        ${!adding && html`<button class="mini" style="flex:1;color:var(--over)" onClick=${removeRow}>Remove</button>`}
-        <button class="mini" style="flex:1" onClick=${close}>Cancel</button>
+        ${!adding && html`<button class="mini" style="flex:1;color:var(--over)" onClick=${removeRow}>${t("ing_remove")}</button>`}
+        <button class="mini" style="flex:1" onClick=${close}>${t("ing_cancel")}</button>
       </div>
     </div>`;
 
   return html`
     <div style="margin-top:16px">
       <div style="display:flex;align-items:baseline;justify-content:space-between">
-        <div class="lab" style="margin:0">What's in it</div>
-        <span class="note" style="font-size:11.5px">Tap any line to correct it</span>
+        <div class="lab" style="margin:0">${t("ing_h")}</div>
+        <span class="note" style="font-size:11.5px">${t("ing_tap")}</span>
       </div>
 
       ${list.map((g, i) => edit === i && draft
@@ -527,16 +959,16 @@ function IngredientList({ ings, base, servings, onChange, mealName, onNeedPass }
         : html`
           <button class="ingb" key=${"r" + i} onClick=${() => open(i)}>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600;font-size:14px">${g.name || "Untitled"}</div>
+              <div style="font-weight:600;font-size:14px">${g.name || t("ing_untitled")}</div>
               ${g.qty && html`<div class="note" style="font-size:12px">${g.qty}</div>`}
             </div>
-            <div class="d" style="font-weight:700;font-size:14px">${Math.round((parseFloat(g.kcal) || 0) * servings)} cal</div>
+            <div class="d" style="font-weight:700;font-size:14px">${Math.round((parseFloat(g.kcal) || 0) * servings)} ${t("u_cal")}</div>
             <span style="color:var(--faint2);font-size:15px">✎</span>
           </button>`)}
 
       ${adding && draft
         ? editor
-        : html`<button class="addb" onClick=${openNew}>+ Add something it missed</button>`}
+        : html`<button class="addb" onClick=${openNew}>${t("ing_add")}</button>`}
     </div>`;
 }
 
@@ -561,13 +993,20 @@ export function App() {
         /* Anyone with saved state was using tally before onboarding existed,
            so don't drag them back through it. */
         setProfile({ ...DEFAULTS, ...(d.profile || {}),
+          lang: (d.profile && d.profile.lang) || detectLang(),
           onboarded: (d.profile && d.profile.onboarded) !== false });
         setDays(d.days || {});
         setWeights(d.weights || []);
+      } else {
+        setProfile((p) => ({ ...p, lang: detectLang() }));
       }
       setReady(true);
     })();
   }, []);
+
+  /* Set during render rather than in an effect: an effect runs after the
+     paint, which would show one frame in the old language every time. */
+  setLang(profile.lang || "en");
 
   /* Keep the painted theme in step with the stored preference, and follow
      the phone if it flips to dark at sunset while the app is open. */
@@ -591,9 +1030,9 @@ export function App() {
   const T = deriveTargets(profile, weight);
   const entries = (days[sel] || []).map(norm);
   const sum = entries.reduce((a, e) => {
-    const t = tot(e);
-    const o = { kcal: a.kcal + t.kcal };
-    MACROS.forEach((k) => { o[k] = a[k] + t[k]; });
+    const tl = tot(e);
+    const o = { kcal: a.kcal + tl.kcal };
+    MACROS.forEach((k) => { o[k] = a[k] + tl[k]; });
     return o;
   }, { kcal: 0, ...MACROS.reduce((a, k) => ({ ...a, [k]: 0 }), {}) });
   const left = T.kcal - sum.kcal, over = left < 0;
@@ -607,10 +1046,10 @@ export function App() {
     const d = new Date(); d.setDate(d.getDate() - i - weekOff * 7);
     const k = todayKey(d);
     strip.push({ k, n: d.getDate(), future: k > today,
-      l: d.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 3), tot: dayTotal(k) });
+      l: d.toLocaleDateString(LOCALE(), { weekday: "short" }).slice(0, 3), tot: dayTotal(k) });
   }
-  const fmtShort = (k) => new Date(k + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  const weekLabel = weekOff === 0 ? "This week"
+  const fmtShort = (k) => new Date(k + "T00:00").toLocaleDateString(LOCALE(), { day: "numeric", month: "short" });
+  const weekLabel = weekOff === 0 ? t("week_this")
     : fmtShort(strip[0].k) + " – " + fmtShort(strip[6].k);
 
   /* Meals from the last fortnight, newest first, for the repeat picker.
@@ -623,8 +1062,8 @@ export function App() {
     if (!list.length) continue;
     recentDays.push({
       k,
-      label: i === 1 ? "Yesterday"
-        : d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" }),
+      label: i === 1 ? t("rep_yesterday")
+        : d.toLocaleDateString(LOCALE(), { weekday: "long", day: "numeric", month: "short" }),
       meals: list,
     });
     if (recentDays.length >= 7) break;
@@ -679,32 +1118,34 @@ export function App() {
     save({ profile: { ...profile, ...(data.profile || {}) }, days: nd, weights: nw });
   };
 
-  if (!ready) return html`<div class="wrap" style="padding-top:60px"><span class="note">Loading…</span></div>`;
+  if (!ready) return html`<div class="wrap" style="padding-top:60px"><span class="note">${t("loading")}</span></div>`;
 
   if (!profile.onboarded) {
-    return html`<${Onboarding} onDone=${(p, firstWeight) => {
-      const w = [{ d: todayKey(), kg: firstWeight }];
-      setProfile(p); setWeights(w); setDays({});
-      saveState({ profile: p, days: {}, weights: w });
-    }} />`;
+    return html`<${Onboarding} lang=${profile.lang || "en"}
+      onLang=${(l) => { setLang(l); setProfile((p) => ({ ...p, lang: l })); }}
+      onDone=${(p, firstWeight) => {
+        const w = [{ d: todayKey(), kg: firstWeight }];
+        const full = { ...p, lang: profile.lang || "en", theme: profile.theme || "system" };
+        setProfile(full); setWeights(w); setDays({});
+        saveState({ profile: full, days: {}, weights: w });
+      }} />`;
   }
 
   const liveDetail = detail ? entries.find((e) => e.id === detail) : null;
 
   const hr = new Date().getHours();
-  const timeGreet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+  const timeGreet = t(hr < 12 ? "greet_morning" : hr < 18 ? "greet_afternoon" : "greet_evening");
   const greeting = isBirthday(profile)
-    ? (profile.name ? "Happy birthday, " + profile.name : "Happy birthday")
-    : profile.name ? timeGreet + ", " + profile.name : timeGreet;
+    ? (profile.name ? t("bday_named", { name: profile.name }) : t("bday"))
+    : profile.name ? t("greet_named", { greet: timeGreet, name: profile.name }) : timeGreet;
   const isToday = sel === todayKey();
   const subline = !isToday
-    ? new Date(sel + "T00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }) +
-      " · " + sum.kcal + " of " + T.kcal + ". Tap + to add to this day."
+    ? t("sub_pastday", {
+        date: new Date(sel + "T00:00").toLocaleDateString(LOCALE(), { weekday: "long", day: "numeric", month: "long" }),
+        eaten: sum.kcal, target: T.kcal })
     : entries.length === 0
-      ? "Nothing logged yet today. " + T.kcal + " calories to play with."
-      : over
-        ? Math.abs(left) + " over budget today."
-        : left + " calories left for today.";
+      ? t("sub_empty", { n: T.kcal })
+      : over ? t("sub_over", { n: Math.abs(left) }) : t("sub_left", { n: left });
 
   return html`
     <div>
@@ -719,13 +1160,13 @@ export function App() {
           <div class="hello-s">${subline}</div>
 
           <div class="wknav">
-            <button class="wkarrow" onClick=${() => setWeekOff(weekOff + 1)} aria-label="Previous week">‹</button>
+            <button class="wkarrow" onClick=${() => setWeekOff(weekOff + 1)} aria-label=${t("week_prev")}>‹</button>
             <button class="wklab" data-back=${weekOff === 0 ? "0" : "1"}
               onClick=${() => { setWeekOff(0); setSel(todayKey()); }}>
-              ${weekLabel}${weekOff === 0 ? "" : " · back to today"}
+              ${weekLabel}${weekOff === 0 ? "" : " · " + t("week_return")}
             </button>
             <button class="wkarrow" onClick=${() => setWeekOff(Math.max(0, weekOff - 1))}
-              disabled=${weekOff === 0} aria-label="Next week">›</button>
+              disabled=${weekOff === 0} aria-label=${t("week_next")}>›</button>
           </div>
 
           <div class="strip">
@@ -748,9 +1189,9 @@ export function App() {
               <div class="d" style=${{ fontWeight: 800, fontSize: "42px", lineHeight: 1, color: over ? "var(--over)" : null }}>
                 ${sum.kcal}<span style="font-size:21px;color:var(--faint)">/${T.kcal}</span>
               </div>
-              <div class="note" style="margin-top:7px;font-weight:500">Calories eaten</div>
+              <div class="note" style="margin-top:7px;font-weight:500">${t("cal_eaten")}</div>
               <div class="note" style="font-size:12px;margin-top:2px">
-                ${over ? Math.abs(left) + " over budget" : left + " left"}
+                ${over ? t("cal_over", { n: Math.abs(left) }) : t("cal_left", { n: left })}
               </div>
             </div>
             <${Ring} size=${92} stroke=${9} pct=${sum.kcal / T.kcal} color=${over ? "var(--over)" : "var(--ink)"}>
@@ -759,14 +1200,14 @@ export function App() {
           </div>
 
           <div class="macros">
-            ${[["Protein", sum.protein, T.protein, "var(--pro)", "🍗"],
-               ["Carbs", sum.carbs, T.carbs, "var(--carbc)", "🌾"],
-               ["Fat", sum.fat, T.fat, "var(--fatc)", "🥑"]].map(([n, v, t, c, ic]) => html`
+            ${[["m_protein", sum.protein, T.protein, "var(--pro)", "🍗"],
+               ["m_carbs", sum.carbs, T.carbs, "var(--carbc)", "🌾"],
+               ["m_fat", sum.fat, T.fat, "var(--fatc)", "🥑"]].map(([n, v, tg, c, ic]) => html`
               <div class="macro" key=${n}>
-                <div class="macro-n">${Math.round(v)}<span style="color:var(--faint);font-weight:600">/${t}g</span></div>
-                <div class="macro-l">${n} eaten</div>
+                <div class="macro-n">${Math.round(v)}<span style="color:var(--faint);font-weight:600">/${tg}${t("u_g")}</span></div>
+                <div class="macro-l">${t("macro_eaten", { name: t(n) })}</div>
                 <div style="display:flex;justify-content:center;margin-top:9px">
-                  <${Ring} size=${54} stroke=${6} pct=${v / t} color=${c}><span style="font-size:16px">${ic}</span><//>
+                  <${Ring} size=${54} stroke=${6} pct=${v / tg} color=${c}><span style="font-size:16px">${ic}</span><//>
                 </div>
               </div>`)}
           </div>
@@ -774,18 +1215,18 @@ export function App() {
           <${CarbDetail} sum=${sum} T=${T} />
 
           <div style="margin-top:24px;display:flex;align-items:baseline;justify-content:space-between">
-            <div class="h">Recently logged</div>
+            <div class="h">${t("recent_h")}</div>
             <span class="note">${entries.length}</span>
           </div>
 
           ${entries.length === 0
             ? html`<div class="card empty">
                 <div style="font-size:30px">🥑</div>
-                <div style="margin-top:10px;font-weight:600;color:var(--ink)">Nothing logged yet</div>
-                <div class="note" style="margin-top:5px">Tap + to snap a plate, pick a photo, or just describe what you're having.</div>
+                <div style="margin-top:10px;font-weight:600;color:var(--ink)">${t("empty_h")}</div>
+                <div class="note" style="margin-top:5px">${t("empty_s")}</div>
               </div>`
             : entries.map((e) => {
-                const t = tot(e);
+                const tl = tot(e);
                 return html`
                   <button class="meal" key=${e.id} onClick=${() => setDetail(e.id)}>
                     ${e.thumb
@@ -794,13 +1235,13 @@ export function App() {
                     <div style="flex:1;min-width:0">
                       <div class="meal-n">${e.name}${(e.servings || 1) !== 1 ? " ×" + e.servings : ""}</div>
                       <div class="tags">
-                        <span class="tag">🔥 ${t.kcal}</span>
-                        <span class="tag"><i class="tagdot" style="background:var(--pro)"></i>${t.protein}g</span>
-                        <span class="tag"><i class="tagdot" style="background:var(--carbc)"></i>${t.carbs}g</span>
-                        <span class="tag"><i class="tagdot" style="background:var(--fatc)"></i>${t.fat}g</span>
+                        <span class="tag">🔥 ${tl.kcal}</span>
+                        <span class="tag"><i class="tagdot" style="background:var(--pro)"></i>${tl.protein}${t("u_g")}</span>
+                        <span class="tag"><i class="tagdot" style="background:var(--carbc)"></i>${tl.carbs}${t("u_g")}</span>
+                        <span class="tag"><i class="tagdot" style="background:var(--fatc)"></i>${tl.fat}${t("u_g")}</span>
                       </div>
                       <div class="note" style="font-size:11.5px;margin-top:5px">
-                        ${e.slot} · ${new Date(e.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                        ${t("slot_" + e.slot)} · ${new Date(e.at).toLocaleTimeString(LOCALE(), { hour: "numeric", minute: "2-digit" })}
                       </div>
                     </div>
                     <span style="color:var(--faint2);font-size:20px">›</span>
@@ -819,7 +1260,7 @@ export function App() {
           onWipe=${() => {
             /* Erasing the food log shouldn't hand someone back a white screen
                on a dark phone, so the theme survives. */
-            const fresh = { ...DEFAULTS, onboarded: false, theme: profile.theme };
+            const fresh = { ...DEFAULTS, onboarded: false, theme: profile.theme, lang: profile.lang };
             saveState({ profile: fresh, days: {}, weights: [] });
             setDays({}); setWeights([]); setProfile(fresh);
           }} />`}
@@ -828,17 +1269,17 @@ export function App() {
       <div class="nav">
         <div class="navin">
           <div class="navpill">
-            <button class="navbtn" data-on=${tab === "home" ? "1" : "0"} onClick=${() => setTab("home")}><span style="font-size:17px">⌂</span>Home</button>
-            <button class="navbtn" data-on=${tab === "progress" ? "1" : "0"} onClick=${() => setTab("progress")}><span style="font-size:17px">◪</span>Progress</button>
-            <button class="navbtn" data-on=${tab === "profile" ? "1" : "0"} onClick=${() => setTab("profile")}><span style="font-size:17px">☺</span>Profile</button>
+            <button class="navbtn" data-on=${tab === "home" ? "1" : "0"} onClick=${() => setTab("home")}><span style="font-size:17px">⌂</span>${t("nav_home")}</button>
+            <button class="navbtn" data-on=${tab === "progress" ? "1" : "0"} onClick=${() => setTab("progress")}><span style="font-size:17px">◪</span>${t("nav_progress")}</button>
+            <button class="navbtn" data-on=${tab === "profile" ? "1" : "0"} onClick=${() => setTab("profile")}><span style="font-size:17px">☺</span>${t("nav_profile")}</button>
           </div>
-          <button class="fab" onClick=${() => { setTab("home"); setSheet(true); }} aria-label="Add a meal">+</button>
+          <button class="fab" onClick=${() => { setTab("home"); setSheet(true); }} aria-label=${t("aria_add")}>+</button>
         </div>
       </div>
 
       ${sheet && html`<${LogSheet} onClose=${() => setSheet(false)} onAdd=${addEntry} onAddMany=${addMany}
         eaten=${sum.kcal} budget=${T.kcal} proteinLeft=${Math.max(0, T.protein - sum.protein)}
-        recentDays=${recentDays} forDay=${isToday ? "" : new Date(sel + "T00:00").toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+        recentDays=${recentDays} forDay=${isToday ? "" : new Date(sel + "T00:00").toLocaleDateString(LOCALE(), { weekday: "long", day: "numeric", month: "long" })}
         onNeedPass=${() => setNeedPass(true)} />`}
 
       ${liveDetail && html`<${MealDetail} e=${liveDetail} onClose=${() => setDetail(null)}
@@ -851,7 +1292,7 @@ export function App() {
 
 /* ============================ onboarding ============================ */
 
-function Onboarding({ onDone }) {
+function Onboarding({ onDone, lang, onLang }) {
   const [i, setI] = useState(0);
   const [f, setF] = useState({
     name: "", dob: "", sex: "male", heightCm: "", weight: "", goalWeight: "",
@@ -882,7 +1323,7 @@ function Onboarding({ onDone }) {
 
   const draft = {
     ...DEFAULTS, onboarded: true, name: f.name.trim(), dob: f.dob, age: age || 30,
-    theme: "system", sex: f.sex, heightCm: Math.round(cm),
+    sex: f.sex, heightCm: Math.round(cm),
     startWeight: kg, goalWeight: goal, stretchWeight: Math.max(floorKg || 0, Math.round((goal - 2.5) * 10) / 10),
     activity: f.activity, weeklyLoss: f.weeklyLoss,
   };
@@ -905,97 +1346,91 @@ function Onboarding({ onDone }) {
       <div style="flex:1">
         ${i === 0 && html`
           <div>
-            ${Head("Welcome to tally", "A calorie tracker you can point at your food. First, a few questions so the numbers are yours and not someone else's.")}
+            <div class="seg" style="margin-bottom:20px">
+              ${LANGS.map((l) => html`
+                <button class="segb" key=${l.id} data-on=${lang === l.id ? "1" : "0"}
+                  onClick=${() => onLang && onLang(l.id)}>${l.label}</button>`)}
+            </div>
+            ${Head(t("ob_welcome_h"), t("ob_welcome_s"))}
             <div style="margin-top:22px">
-              <label class="lab">What should it call you?</label>
-              <input class="in" autofocus placeholder="First name" value=${f.name} onInput=${set("name")} />
+              <label class="lab">${t("ob_name_l")}</label>
+              <input class="in" autofocus placeholder=${t("ob_name_ph")} value=${f.name} onInput=${set("name")} />
             </div>
-            <div class="obs" style="font-size:12.5px;margin-top:18px">
-              Everything you log stays on this phone. Nothing is uploaded, and nobody else can see it — not even the person who shared this with you.
-            </div>
+            <div class="obs" style="font-size:12.5px;margin-top:18px">${t("ob_private")}</div>
           </div>`}
 
         ${i === 1 && html`
           <div>
-            ${Head("About you", "Your date of birth, height and sex go into the equation that estimates what your body burns at rest.")}
+            ${Head(t("ob_about_h"), t("ob_about_s"))}
             <div style="margin-top:20px">
-              <label class="lab">Date of birth</label>
+              <label class="lab">${t("ob_dob_l")}</label>
               <input class="in" type="date" value=${f.dob} onInput=${set("dob")}
                 max=${todayKey()} min="1920-01-01" />
               <div class="note" style="font-size:12px;margin-top:6px">
-                ${age === null
-                  ? "tally works your age out from this, so it stays right as the years pass."
-                  : "That makes you " + age + ". Your target will adjust itself on your birthday."}
+                ${age === null ? t("ob_dob_note") : t("ob_dob_age", { age })}
               </div>
             </div>
             <div style="margin-top:16px">
-              <label class="lab">Height (cm)</label>
+              <label class="lab">${t("ob_height_l")}</label>
               <input class="in" type="number" inputmode="numeric" placeholder="166" value=${f.heightCm} onInput=${set("heightCm")} />
             </div>
             <div style="margin-top:16px">
-              <label class="lab">Which does the formula fit better?</label>
-              ${[["male", "Male"], ["female", "Female"]].map(([v, l]) => html`
-                <button class="opt" key=${v} data-on=${f.sex === v ? "1" : "0"} onClick=${() => setF({ ...f, sex: v })}>${l}</button>`)}
+              <label class="lab">${t("ob_sex_l")}</label>
+              ${[["male", "ob_male"], ["female", "ob_female"]].map(([v, l]) => html`
+                <button class="opt" key=${v} data-on=${f.sex === v ? "1" : "0"} onClick=${() => setF({ ...f, sex: v })}>${t(l)}</button>`)}
             </div>
             ${tooYoung && html`
               <div class="stop">
-                <strong>tally isn't built for under 18s.</strong><br />
-                The equation it uses is for adult bodies, and calorie targets for someone still growing are
-                something a doctor should set — not an app. If you'd like help with eating well, a GP or a
-                school nurse is the right place to start.
+                <strong>${t("ob_young_h")}</strong><br />${t("ob_young_s")}
               </div>`}
           </div>`}
 
         ${i === 2 && html`
           <div>
-            ${Head("Where you are, where you're heading", "Weigh yourself in the morning if you can — it's the most consistent time.")}
+            ${Head(t("ob_weight_h"), t("ob_weight_s"))}
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px">
               <div>
-                <label class="lab">Weight now (kg)</label>
+                <label class="lab">${t("ob_now_l")}</label>
                 <input class="in" type="number" step="0.1" inputmode="decimal" placeholder="72.5" value=${f.weight} onInput=${set("weight")} />
               </div>
               <div>
-                <label class="lab">Goal (kg)</label>
+                <label class="lab">${t("ob_goal_l")}</label>
                 <input class="in" type="number" step="0.5" inputmode="decimal" placeholder="69" value=${f.goalWeight} onInput=${set("goalWeight")} />
               </div>
             </div>
-            ${goalNotLower && html`<div class="warn">tally is set up for losing weight, so your goal needs to be below where you are now.</div>`}
+            ${goalNotLower && html`<div class="warn">${t("ob_goal_high")}</div>`}
             ${alreadyLean && !goalNotLower && html`
-              <div class="warn">
-                You're already at the lean end of the healthy range for your height. Losing more isn't
-                something to take on without talking to a doctor first.
-              </div>`}
+              <div class="warn">${t("ob_lean")}</div>`}
             ${goalTooLow && !goalNotLower && !alreadyLean && html`
               <div class="warn">
-                ${goal + " kg is below the healthy weight range for " + Math.round(cm) + " cm — that range starts around " + floorKg + " kg. You can carry on, but it's worth a conversation with a doctor before aiming there."}
+                ${t("ob_goal_low", { goal, cm: Math.round(cm), floor: floorKg })}
               </div>`}
           </div>`}
 
         ${i === 3 && html`
           <div>
-            ${Head("How much do you move?", "Be honest rather than optimistic — an overestimate here inflates your budget every single day.")}
+            ${Head(t("ob_move_h"), t("ob_move_s"))}
             <div style="margin-top:18px">
               ${ACTIVITY.map((a) => html`
                 <button class="opt" key=${a.id} data-on=${f.activity === a.id ? "1" : "0"}
-                  onClick=${() => setF({ ...f, activity: a.id })}>${a.label}</button>`)}
+                  onClick=${() => setF({ ...f, activity: a.id })}>${t(a.key)}</button>`)}
             </div>
             <div style="margin-top:20px">
-              <label class="lab">How fast do you want it to come off?</label>
-              ${[[0.25, "0.25 kg a week — gradual, barely noticeable"],
-                 [0.5, "0.5 kg a week — steady, the usual choice"],
-                 [0.75, "0.75 kg a week — demanding, harder to stick to"]].map(([v, l]) => html`
+              <label class="lab">${t("ob_pace_l")}</label>
+              ${[[0.25, "ob_pace_25"], [0.5, "ob_pace_50"], [0.75, "ob_pace_75"]].map(([v, l]) => html`
                 <button class="opt" key=${v} data-on=${f.weeklyLoss === v ? "1" : "0"}
-                  onClick=${() => setF({ ...f, weeklyLoss: v })}>${l}</button>`)}
+                  onClick=${() => setF({ ...f, weeklyLoss: v })}>${t(l)}</button>`)}
             </div>
           </div>`}
 
         ${i === 4 && T && html`
           <div>
-            ${Head("Here's your plan", "Worked out with Mifflin-St Jeor, the same equation most dietitians start from.")}
+            ${Head(t("ob_plan_h"), t("ob_plan_s"))}
             <div class="card" style="margin-top:18px">
-              ${[["Resting burn", T.bmr + " cal"], ["Daily burn", T.tdee + " cal"], ["Eat each day", T.kcal + " cal"],
-                 ["Protein", T.protein + " g"], ["Fat", T.fat + " g"], ["Carbs", T.carbs + " g"],
-                 ["— of which fibre, at least", T.fibre + " g"], ["— of which sugar, at most", T.sugar + " g"]].map(([k, v], n) => html`
+              ${[[t("plan_bmr"), T.bmr + " " + t("u_cal")], [t("plan_tdee"), T.tdee + " " + t("u_cal")],
+                 [t("plan_eat"), T.kcal + " " + t("u_cal")], [t("m_protein"), T.protein + " " + t("u_g")],
+                 [t("m_fat"), T.fat + " " + t("u_g")], [t("m_carbs"), T.carbs + " " + t("u_g")],
+                 [t("plan_fibre"), T.fibre + " " + t("u_g")], [t("plan_sugar"), T.sugar + " " + t("u_g")]].map(([k, v], n) => html`
                 <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
                   padding: "11px 0", borderBottom: n === 7 ? "none" : "1px solid var(--hair)" }}>
                   <span class="note" style="font-weight:500">${k}</span>
@@ -1004,29 +1439,22 @@ function Onboarding({ onDone }) {
             </div>
             ${atFloor && html`
               <div class="warn">
-                Your target has been held at the floor of ${f.sex === "female" ? 1200 : 1500} calories. tally won't
-                go below that, so you'll lose a little slower than the pace you picked. That's deliberate.
+                ${t("ob_floor", { n: f.sex === "female" ? 1200 : 1500 })}
               </div>`}
             <div style="margin-top:18px">
-              <label class="lab">Access code</label>
-              <input class="in" type="password" placeholder="The code you were sent" value=${f.pass} onInput=${set("pass")} />
-              <div class="obs" style="font-size:12.5px;margin-top:8px">
-                Whoever shared tally with you will have sent a code. It lets the app read your photos and
-                costs them a little each time, which is why it's not open to everyone. You can add it later if you don't have it yet.
-              </div>
+              <label class="lab">${t("ob_code_l")}</label>
+              <input class="in" type="password" placeholder=${t("ob_code_ph")} value=${f.pass} onInput=${set("pass")} />
+              <div class="obs" style="font-size:12.5px;margin-top:8px">${t("ob_code_note")}</div>
             </div>
-            <div class="obs" style="font-size:12.5px;margin-top:16px">
-              These are estimates, not medical advice. If you're pregnant, managing a health condition, or
-              have a history of disordered eating, talk to a doctor before following a calorie target.
-            </div>
+            <div class="obs" style="font-size:12.5px;margin-top:16px">${t("ob_medical")}</div>
           </div>`}
       </div>
 
       <div style="display:flex;gap:9px;margin-top:26px">
-        ${i > 0 && html`<button class="b b2" style="width:auto;padding:15px 22px" onClick=${() => setI(i - 1)}>Back</button>`}
+        ${i > 0 && html`<button class="b b2" style="width:auto;padding:15px 22px" onClick=${() => setI(i - 1)}>${t("ob_back")}</button>`}
         ${i < 4
-          ? html`<button class="b" onClick=${() => setI(i + 1)} disabled=${!okStep || tooYoung}>Continue</button>`
-          : html`<button class="b b3" onClick=${finish}>Start tracking</button>`}
+          ? html`<button class="b" onClick=${() => setI(i + 1)} disabled=${!okStep || tooYoung}>${t("ob_continue")}</button>`
+          : html`<button class="b b3" onClick=${finish}>${t("ob_start")}</button>`}
       </div>
     </div>`;
 }
@@ -1039,15 +1467,12 @@ function PassSheet({ onClose }) {
     <div class="scrim" onClick=${onClose}>
       <div class="sheet" onClick=${(e) => e.stopPropagation()}>
         <div class="grab"></div>
-        <div class="h">Enter your passcode</div>
-        <div class="note" style="margin-top:8px">
-          This is the passcode you set on the server when you deployed. It stops anyone else who finds
-          this address from spending your API credit.
-        </div>
+        <div class="h">${t("pass_h")}</div>
+        <div class="note" style="margin-top:8px">${t("pass_note")}</div>
         <input class="in" style="margin-top:14px" type="password" ref=${ref} autofocus
           onKeyDown=${(e) => { if (e.key === "Enter") { setPass(e.target.value.trim()); onClose(); } }} />
         <button class="b" style="margin-top:10px"
-          onClick=${() => { if (ref.current) setPass(ref.current.value.trim()); onClose(); }}>Save passcode</button>
+          onClick=${() => { if (ref.current) setPass(ref.current.value.trim()); onClose(); }}>${t("pass_save")}</button>
       </div>
     </div>`;
 }
@@ -1075,14 +1500,14 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
 
   const pick = async (file) => {
     if (!file) return;
-    if (!/^image\//.test(file.type)) { setErr("That isn't an image."); return; }
+    if (!/^image\//.test(file.type)) { setErr(t("log_notimage")); return; }
     setErr("");
     try {
       const full = await shrink(file, 1100, 0.82);
       const thumb = await shrink(file, 320, 0.6);
       const p = dataUrlParts(full);
       setImg({ b64: p.b64, media: p.media, url: full, thumb });
-    } catch { setErr("Couldn't read that photo. Try another."); }
+    } catch { setErr(t("log_badphoto")); }
   };
 
   const run = async () => {
@@ -1113,7 +1538,7 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
       const kc = Math.max(0, Math.round(p.kcal || 0));
       const carbs = Math.max(0, Math.round(p.carbs || 0));
       setBase({
-        name: p.name || "Meal",
+        name: p.name || t("meal_default"),
         kcal: kc, protein: Math.max(0, Math.round(p.protein || 0)),
         carbs, fat: Math.max(0, Math.round(p.fat || 0)),
         /* Sugar and fibre are parts of the carb figure, so neither can
@@ -1127,9 +1552,9 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
         note: p.note || "", advice: p.advice || "",
       });
     } catch (e) {
-      if (e && e.auth) { onNeedPass(); setErr("Passcode needed before it can estimate."); }
-      else setErr("That didn't come back. Try again, or type the numbers in yourself.");
-      setBase({ name: text.trim() || "Meal", kcal: 0, protein: 0, carbs: 0, fat: 0, sugar: 0, fibre: 0,
+      if (e && e.auth) { onNeedPass(); setErr(t("log_err_pass")); }
+      else setErr(t("log_err"));
+      setBase({ name: text.trim() || t("meal_default"), kcal: 0, protein: 0, carbs: 0, fat: 0, sugar: 0, fibre: 0,
         kcalLow: 0, kcalHigh: 0, confidence: "low", basis: "", ingredients: [], note: "", advice: "" });
     }
     setBusy(false);
@@ -1138,9 +1563,9 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
   const projected = eaten + (m ? m.kcal : 0), after = budget - projected;
   const key = after >= 150 ? "fits" : after >= 0 ? "tight" : "over";
   const V = {
-    fits: { bg: "var(--okBg)", fg: "var(--okFg)", ac: "var(--okAc)", head: "Go for it" },
-    tight: { bg: "var(--warnBg)", fg: "var(--warnFg)", ac: "var(--warnAc)", head: "Cutting it fine" },
-    over: { bg: "var(--stopBg)", fg: "var(--stopFg)", ac: "var(--stopAc)", head: "Puts you over" },
+    fits: { bg: "var(--okBg)", fg: "var(--okFg)", ac: "var(--okAc)", head: t("v_fits") },
+    tight: { bg: "var(--warnBg)", fg: "var(--warnFg)", ac: "var(--warnAc)", head: t("v_tight") },
+    over: { bg: "var(--stopBg)", fg: "var(--stopFg)", ac: "var(--stopAc)", head: t("v_over") },
   }[key];
   const max = Math.max(budget, projected);
 
@@ -1187,21 +1612,21 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
         ${!m && repeating && html`
           <div>
             <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
-              <div class="h">Something you've had before</div>
-              <button class="x" style="width:auto;padding:0 10px;border-radius:999px" onClick=${() => setRepeating(false)}>Back</button>
+              <div class="h">${t("rep_h")}</div>
+              <button class="x" style="width:auto;padding:0 10px;border-radius:999px" onClick=${() => setRepeating(false)}>${t("rep_back")}</button>
             </div>
             <div class="note" style="margin-top:6px">
-              Tap a meal to log it again — you can change the portion first. "Add all" puts a whole day back in one go.
+              ${t("rep_note")}
             </div>
 
             ${(recentDays || []).map((d) => html`
               <div key=${d.k}>
                 <div class="repd">
                   <span>${d.label}</span>
-                  <button class="repall" onClick=${() => repeatAll(d.meals)}>Add all ${d.meals.length}</button>
+                  <button class="repall" onClick=${() => repeatAll(d.meals)}>${t("rep_all", { n: d.meals.length })}</button>
                 </div>
                 ${d.meals.map((e) => {
-                  const t = tot(e);
+                  const tt = tot(e);
                   return html`
                     <button class="repb" key=${e.id} onClick=${() => repeat(e)}>
                       ${e.thumb
@@ -1209,7 +1634,7 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
                         : html`<div class="rept rept-ph">${SLOT_ICON[e.slot] || "🍽️"}</div>`}
                       <div style="flex:1;min-width:0">
                         <div style="font-weight:600;font-size:14px;line-height:1.25">${e.name}</div>
-                        <div class="note" style="font-size:11.5px;margin-top:3px">${e.slot} · ${t.kcal} cal</div>
+                        <div class="note" style="font-size:11.5px;margin-top:3px">${t("slot_" + e.slot)} · ${tt.kcal} ${t("u_cal")}</div>
                       </div>
                       <span style="color:var(--faint2);font-size:18px">＋</span>
                     </button>`;
@@ -1219,8 +1644,8 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
 
         ${!m && !repeating && html`
           <div>
-            <div class="h">What are you having?</div>
-            ${forDay && html`<div class="note" style="margin-top:6px">This will be logged to ${forDay}.</div>`}
+            <div class="h">${t("log_h")}</div>
+            ${forDay && html`<div class="note" style="margin-top:6px">${t("log_forday", { day: forDay })}</div>`}
 
             ${img
               ? html`
@@ -1233,42 +1658,42 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
                 <div>
                   <button class="bigb" onClick=${() => camRef.current && camRef.current.click()}>
                     <div class="bigb-i">📷</div>
-                    <div><div class="bigb-t">Snap the plate</div><div class="bigb-s">Straight to the camera</div></div>
+                    <div><div class="bigb-t">${t("log_snap_t")}</div><div class="bigb-s">${t("log_snap_s")}</div></div>
                   </button>
                   <button class="bigb" onClick=${() => galRef.current && galRef.current.click()}>
                     <div class="bigb-i">🖼️</div>
-                    <div><div class="bigb-t">Choose a photo</div><div class="bigb-s">From your camera roll</div></div>
+                    <div><div class="bigb-t">${t("log_pick_t")}</div><div class="bigb-s">${t("log_pick_s")}</div></div>
                   </button>
                   ${!typing && html`
                     <button class="bigb" onClick=${() => setTyping(true)}>
                       <div class="bigb-i">✏️</div>
-                      <div><div class="bigb-t">Just describe it</div><div class="bigb-s">No photo needed</div></div>
+                      <div><div class="bigb-t">${t("log_type_t")}</div><div class="bigb-s">${t("log_type_s")}</div></div>
                     </button>`}
                   ${hasRecent && html`
                     <button class="bigb" onClick=${() => setRepeating(true)}>
                       <div class="bigb-i">↺</div>
                       <div>
-                        <div class="bigb-t">Had it before</div>
-                        <div class="bigb-s">Copy a meal from yesterday or earlier</div>
+                        <div class="bigb-t">${t("log_again_t")}</div>
+                        <div class="bigb-s">${t("log_again_s")}</div>
                       </div>
                     </button>`}
                 </div>`}
 
             ${(img || typing) && html`
               <input class="in" style="margin-top:11px" autofocus=${typing && !img}
-                placeholder=${isLabel ? "How much of it are you having?" : img ? "Anything it can't see? Optional" : "Chicken machboos with rice"}
+                placeholder=${t(isLabel ? "log_ph_label" : img ? "log_ph_photo" : "log_ph_text")}
                 value=${text} onInput=${(e) => setText(e.target.value)}
                 onKeyDown=${(e) => { if (e.key === "Enter" && !busy) run(); }} />`}
 
             ${img && html`
               <div style="display:flex;gap:6px;margin-top:10px">
-                <button class="pill" data-on=${!isLabel ? "1" : "0"} onClick=${() => setIsLabel(false)}>🍽️ It's food</button>
-                <button class="pill" data-on=${isLabel ? "1" : "0"} onClick=${() => setIsLabel(true)}>🏷️ It's a label</button>
+                <button class="pill" data-on=${!isLabel ? "1" : "0"} onClick=${() => setIsLabel(false)}>${t("log_isfood")}</button>
+                <button class="pill" data-on=${isLabel ? "1" : "0"} onClick=${() => setIsLabel(true)}>${t("log_islabel")}</button>
               </div>`}
 
             ${(img || typing) && html`
               <button class="b" style="margin-top:11px" onClick=${run} disabled=${busy || (!img && !text.trim())}>
-                ${busy ? html`<span class="spin"></span>Working it out` : "Work out the calories"}
+                ${busy ? html`<span class="spin"></span>${t("log_running")}` : t("log_run")}
               </button>`}
 
             ${err && html`<div class="err">${err}</div>`}
@@ -1277,19 +1702,22 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
         ${m && html`
           <div>
             <div class="verdict" style=${{ background: V.bg, color: V.fg, marginTop: 0 }}>
-              <div class="vhead">${V.head}${key === "over" ? " by " + Math.abs(after) : ""}</div>
-              <div class="vsub">${base.name}, about <strong>${m.kcal} cal</strong>. That would put you at ${projected} of ${budget}${after >= 0 ? ", with " + after + " left for the day." : "."}</div>
+              <div class="vhead">${V.head}${key === "over" ? t("v_over_by", { n: Math.abs(after) }) : ""}</div>
+              <div class="vsub">
+                ${t("v_line", { name: base.name })} <strong>${m.kcal} ${t("u_cal")}</strong>.
+                ${t("v_line2", { done: projected, budget })}${after >= 0 ? t("v_left", { n: after }) : t("v_stop")}
+              </div>
               <div class="track">
                 <div style=${{ width: (eaten / max) * 100 + "%", background: V.ac, opacity: .4 }}></div>
                 <div style=${{ width: (m.kcal / max) * 100 + "%", background: V.ac }}></div>
                 <div class="mark" style=${{ left: (budget / max) * 100 + "%" }}></div>
               </div>
               ${base.advice && html`<div class="vsub">${base.advice}</div>`}
-              ${proteinLeft > 0 && m.protein >= proteinLeft * 0.4 && html`<div class="vsub">Strong on protein: ${m.protein}g of the ${proteinLeft}g you still need.</div>`}
+              ${proteinLeft > 0 && m.protein >= proteinLeft * 0.4 && html`<div class="vsub">${t("v_protein", { n: m.protein, need: proteinLeft })}</div>`}
             </div>
 
             <${Confidence} level=${base.confidence} low=${base.kcalLow} high=${base.kcalHigh} servings=${servings} />
-            ${base.basis && html`<div class="note" style="font-size:12px;margin-top:6px">Judged against ${base.basis}.</div>`}
+            ${base.basis && html`<div class="note" style="font-size:12px;margin-top:6px">${t("v_basis", { basis: base.basis })}</div>`}
 
             <div style="margin-top:15px;display:flex;gap:10px;align-items:center">
               ${img && html`<img src=${img.thumb} alt="" style="width:52px;height:52px;border-radius:15px;object-fit:cover;flex:none" />`}
@@ -1312,9 +1740,9 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
             ${base.note && html`<div class="note" style="margin-top:11px">${base.note}</div>`}
 
             <div style="margin-top:16px">
-              <div class="lab">When was this?</div>
+              <div class="lab">${t("log_when")}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
-                ${SLOTS.map((s) => html`<button class="pill" key=${s} data-on=${slot === s ? "1" : "0"} onClick=${() => setSlot(s)}>${s}</button>`)}
+                ${SLOTS.map((s) => html`<button class="pill" key=${s} data-on=${slot === s ? "1" : "0"} onClick=${() => setSlot(s)}>${t("slot_" + s)}</button>`)}
               </div>
             </div>
 
@@ -1323,10 +1751,10 @@ function LogSheet({ onClose, onAdd, onAddMany, eaten, budget, proteinLeft, recen
               base: MACROS.reduce((a, k) => ({ ...a, [k]: base[k] || 0 }), { kcal: base.kcal }),
               ingredients: base.ingredients || [], note: base.note || "", thumb: img ? img.thumb : null,
             })}>
-              Log it · ${m.kcal} cal
+              ${t("log_it", { n: m.kcal })}
             </button>
-            <button class="b b2" style="margin-top:8px" onClick=${onClose}>Just checking — don't log it</button>
-            <button class="b b2" style="margin-top:8px" onClick=${reset}>Start again</button>
+            <button class="b b2" style="margin-top:8px" onClick=${onClose}>${t("log_justchecking")}</button>
+            <button class="b b2" style="margin-top:8px" onClick=${reset}>${t("log_restart")}</button>
           </div>`}
       </div>
     </div>`;
@@ -1340,7 +1768,7 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
   const [fixText, setFixText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const t = tot(e), s = e.servings || 1;
+  const tl = tot(e), s = e.servings || 1;
 
   const applyFix = async () => {
     if (!fixText.trim()) return;
@@ -1378,8 +1806,8 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
       });
       setFixing(false); setFixText("");
     } catch (ex) {
-      if (ex && ex.auth) { onNeedPass(); setErr("Passcode needed."); }
-      else setErr("Couldn't revise it. Try again, or edit the numbers by hand.");
+      if (ex && ex.auth) { onNeedPass(); setErr(t("md_err_pass")); }
+      else setErr(t("md_err"));
     }
     setBusy(false);
   };
@@ -1399,7 +1827,7 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
           <div style="flex:1">
             <div class="d" style="font-weight:700;font-size:21px;line-height:1.15">${e.name}</div>
             <div class="note" style="font-size:12px;margin-top:5px">
-              ${e.slot} · ${new Date(e.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+              ${t("slot_" + e.slot)} · ${new Date(e.at).toLocaleTimeString(LOCALE(), { hour: "numeric", minute: "2-digit" })}
             </div>
           </div>
           <div class="step">
@@ -1412,36 +1840,36 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
         <div class="card" style="display:flex;align-items:center;gap:14px;margin-top:16px">
           <span style="font-size:24px">🔥</span>
           <div>
-            <div class="note" style="font-weight:500">Calories</div>
-            <div class="d" style="font-weight:800;font-size:32px;line-height:1.1">${t.kcal}</div>
+            <div class="note" style="font-weight:500">${t("md_calories")}</div>
+            <div class="d" style="font-weight:800;font-size:32px;line-height:1.1">${tl.kcal}</div>
           </div>
         </div>
 
         <div class="macros">
-          ${[["Protein", t.protein, "var(--pro)", "🍗"], ["Carbs", t.carbs, "var(--carbc)", "🌾"], ["Fat", t.fat, "var(--fatc)", "🥑"]].map(([n, v, c, ic]) => html`
+          ${[["m_protein", tl.protein, "var(--pro)", "🍗"], ["m_carbs", tl.carbs, "var(--carbc)", "🌾"], ["m_fat", tl.fat, "var(--fatc)", "🥑"]].map(([n, v, c, ic]) => html`
             <div class="macro" key=${n} style="padding:14px 6px">
               <div style="font-size:15px">${ic}</div>
-              <div class="macro-l" style="margin-top:4px">${n}</div>
-              <div class="macro-n" style=${{ color: c, marginTop: "3px" }}>${v}g</div>
+              <div class="macro-l" style="margin-top:4px">${t(n)}</div>
+              <div class="macro-n" style=${{ color: c, marginTop: "3px" }}>${v}${t("u_g")}</div>
             </div>`)}
         </div>
 
         <div style="display:flex;gap:9px;margin-top:9px">
-          ${[["Of which fibre", t.fibre, "var(--fibre)"], ["Of which sugar", t.sugar, "var(--sugar)"]].map(([n, v, c]) => html`
+          ${[["ofwhich_fibre", tl.fibre, "var(--fibre)"], ["ofwhich_sugar", tl.sugar, "var(--sugar)"]].map(([n, v, c]) => html`
             <div key=${n} style="flex:1;background:var(--bg);border-radius:16px;padding:11px 13px">
-              <div class="macro-l" style="text-align:left">${n}</div>
-              <div class="macro-n" style=${{ color: c, marginTop: "2px" }}>${v}g</div>
+              <div class="macro-l" style="text-align:left">${t(n)}</div>
+              <div class="macro-n" style=${{ color: c, marginTop: "2px" }}>${v}${t("u_g")}</div>
             </div>`)}
         </div>
 
         ${editing
           ? html`
             <div style="margin-top:16px">
-              <div class="lab">The numbers, per serving × ${s}</div>
+              <div class="lab">${t("md_numbers", { n: s })}</div>
               <${NumberGrid} base=${e.base} servings=${s} onBase=${(nb) => onPatch({ base: nb })} />
-              <button class="b b2" style="margin-top:10px" onClick=${() => setEditing(false)}>Done editing</button>
+              <button class="b b2" style="margin-top:10px" onClick=${() => setEditing(false)}>${t("md_doneedit")}</button>
             </div>`
-          : html`<button class="addb" style="margin-top:12px" onClick=${() => setEditing(true)}>✎ Edit these numbers</button>`}
+          : html`<button class="addb" style="margin-top:12px" onClick=${() => setEditing(true)}>${t("md_edit")}</button>`}
 
         <${IngredientList} ings=${e.ingredients} servings=${s} base=${e.base} mealName=${e.name}
           onNeedPass=${onNeedPass}
@@ -1451,25 +1879,23 @@ function MealDetail({ e, onClose, onPatch, onDelete, onNeedPass }) {
 
         ${fixing
           ? html`<div style="margin-top:18px">
-              <label class="lab">Tell it what's wrong</label>
-              <input class="in" autofocus placeholder="No dressing, and the portion was double"
+              <label class="lab">${t("md_fix_l")}</label>
+              <input class="in" autofocus placeholder=${t("md_fix_ph")}
                 value=${fixText} onInput=${(ev) => setFixText(ev.target.value)}
                 onKeyDown=${(ev) => { if (ev.key === "Enter" && !busy) applyFix(); }} />
-              <div class="note" style="font-size:12px;margin-top:8px">
-                Best for whole-dish corrections. For one item, tap it in the list above.
-              </div>
+              <div class="note" style="font-size:12px;margin-top:8px">${t("md_fix_note")}</div>
               ${err && html`<div class="err">${err}</div>`}
               <button class="b" style="margin-top:10px" onClick=${applyFix} disabled=${busy || !fixText.trim()}>
-                ${busy ? html`<span class="spin"></span>Recalculating` : "Update the estimate"}
+                ${busy ? html`<span class="spin"></span>${t("md_fixing")}` : t("md_fix_go")}
               </button>
-              <button class="b b2" style="margin-top:8px" onClick=${() => { setFixing(false); setErr(""); }}>Cancel</button>
+              <button class="b b2" style="margin-top:8px" onClick=${() => { setFixing(false); setErr(""); }}>${t("md_cancel")}</button>
             </div>`
           : html`<div style="display:flex;gap:9px;margin-top:20px">
-              <button class="b b2" onClick=${() => setFixing(true)}>✦ Redo the whole thing</button>
-              <button class="b" onClick=${onClose}>Done</button>
+              <button class="b b2" onClick=${() => setFixing(true)}>${t("md_redo")}</button>
+              <button class="b" onClick=${onClose}>${t("md_done")}</button>
             </div>`}
 
-        <button class="b b2" style="margin-top:9px;color:var(--over)" onClick=${onDelete}>Delete this meal</button>
+        <button class="b b2" style="margin-top:9px;color:var(--over)" onClick=${onDelete}>${t("md_delete")}</button>
       </div>
     </div>`;
 }
@@ -1518,18 +1944,18 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
     <div style="padding-top:6px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
         <div class="card" style="margin:0;padding:17px">
-          <div class="note" style="font-size:12px;font-weight:500">Your weight</div>
-          <div class="d" style="font-weight:800;font-size:26px;margin-top:3px">${weight.toFixed(1)} <span style="font-size:14px;color:var(--faint)">kg</span></div>
+          <div class="note" style="font-size:12px;font-weight:500">${t("pr_weight")}</div>
+          <div class="d" style="font-weight:800;font-size:26px;margin-top:3px">${dec(weight)} <span style="font-size:14px;color:var(--faint)">${t("u_kg")}</span></div>
           <div style="height:6px;background:var(--track);border-radius:99px;margin-top:11px;overflow:hidden">
             <div style=${{ width: prog * 100 + "%", height: "100%", background: "var(--lime)", borderRadius: "99px" }}></div>
           </div>
-          <div class="note" style="font-size:11.5px;margin-top:7px">Goal ${goal} kg · ${Math.round(prog * 100)}%</div>
+          <div class="note" style="font-size:11.5px;margin-top:7px">${t("pr_goal", { kg: goal, pct: Math.round(prog * 100) })}</div>
         </div>
 
         <div class="card" style="margin:0;padding:17px;text-align:center">
           <div style="font-size:26px">🔥</div>
-          <div class="d" style="font-weight:800;font-size:22px;margin-top:2px">${streak} day${streak === 1 ? "" : "s"}</div>
-          <div class="note" style="font-size:11.5px">logged in a row</div>
+          <div class="d" style="font-weight:800;font-size:22px;margin-top:2px">${t("pr_streak", { n: streak, unit: tp("days", streak) })}</div>
+          <div class="note" style="font-size:11.5px">${t("pr_streak_s")}</div>
           <div class="wk">
             ${week.map((w) => html`
               <div class="wkd" key=${w.k}>
@@ -1544,8 +1970,8 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
 
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div class="h">Weight progress</div>
-          <span class="pill" style="padding:5px 11px;font-size:11.5px">⚑ ${Math.round(prog * 100)}% of goal</span>
+          <div class="h">${t("pr_chart_h")}</div>
+          <span class="pill" style="padding:5px 11px;font-size:11.5px">${t("pr_ofgoal", { pct: Math.round(prog * 100) })}</span>
         </div>
 
         ${pts.length > 1
@@ -1553,7 +1979,7 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
               <line x1="0" y1=${yF(goal)} x2="100" y2=${yF(goal)} style="stroke:var(--lime)" stroke-width="2" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
               <path d=${path} fill="none" style="stroke:var(--ink)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" />
             </svg>`
-          : html`<div class="note" style="margin-top:14px">Log your weight twice and the trend line appears here.</div>`}
+          : html`<div class="note" style="margin-top:14px">${t("pr_needmore")}</div>`}
 
         <div class="seg" style="margin-top:14px">
           ${[[30, "30D"], [90, "90D"], [365, "1Y"], [9999, "ALL"]].map(([v, l]) => html`
@@ -1561,20 +1987,20 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
         </div>
 
         <div style="display:flex;gap:8px;margin-top:14px">
-          <input class="in" type="number" step="0.1" inputmode="decimal" placeholder="Weigh in, kg" value=${val}
+          <input class="in" type="number" step="0.1" inputmode="decimal" placeholder=${t("pr_weigh_ph")} value=${val}
             onInput=${(e) => setVal(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") submit(); }} />
-          <button class="b" style="width:auto;padding:14px 24px" onClick=${submit} disabled=${!val}>Log</button>
+          <button class="b" style="width:auto;padding:14px 24px" onClick=${submit} disabled=${!val}>${t("pr_log")}</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="h">Daily average calories</div>
+        <div class="h">${t("pr_avg_h")}</div>
         <div style="display:flex;align-items:baseline;gap:9px;margin-top:8px">
           <span class="d" style="font-weight:800;font-size:34px">${avg || "—"}</span>
           ${delta !== 0 && html`<span style=${{ fontWeight: 700, fontSize: "13px", color: delta < 0 ? "var(--good)" : "var(--over)" }}>
             ${delta < 0 ? "↓" : "↑"}${Math.abs(delta)}%
           </span>`}
-          <span class="note" style="font-size:12px">vs last week</span>
+          <span class="note" style="font-size:12px">${t("pr_vs")}</span>
         </div>
 
         <div style="position:relative;margin-top:18px">
@@ -1590,7 +2016,7 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
           ${week.map((w) => html`<div key=${w.k} style="flex:1;text-align:center;font-size:11px;color:var(--faint);font-weight:600">${w.l}</div>`)}
         </div>
         <div class="note" style="margin-top:13px">
-          Dashed line is your ${T.kcal} budget. Judge yourself on the week, not the day.
+          ${t("pr_dashed", { n: T.kcal })}
         </div>
       </div>
     </div>`;
@@ -1605,7 +2031,7 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
   const [impErr, setImpErr] = useState("");
   const [done, setDone] = useState("");
   const fileRef = useRef(null);
-  const t = deriveTargets(p, weight);
+  const tg = deriveTargets(p, weight);
   const dirty = JSON.stringify(p) !== JSON.stringify(profile);
 
   const exportJson = async () => {
@@ -1633,80 +2059,92 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
     try {
       const data = JSON.parse(await file.text());
       if (!data || typeof data !== "object" || (!data.days && !data.weights)) {
-        setImpErr("That doesn't look like a tally backup."); return;
+        setImpErr(t("pf_notbackup")); return;
       }
       const dayKeys = Object.keys(data.days || {});
       const meals = dayKeys.reduce((a, k) => a + (Array.isArray(data.days[k]) ? data.days[k].length : 0), 0);
       setPending({ data, meals, dayKeys: dayKeys.length, weighIns: (data.weights || []).length });
     } catch {
-      setImpErr("Couldn't read that file. Make sure it's the .json backup.");
+      setImpErr(t("pf_badfile"));
     }
   };
 
   return html`
     <div style="padding-top:6px">
       <div class="card">
-        <div class="h">Your plan</div>
+        <div class="h">${t("pf_plan_h")}</div>
         <div style="margin-top:15px">
-          <label class="lab">What should it call you?</label>
-          <input class="in" placeholder="Your first name" value=${p.name || ""}
+          <label class="lab">${t("pf_name_l")}</label>
+          <input class="in" placeholder=${t("pf_name_ph")} value=${p.name || ""}
             onInput=${(e) => setP({ ...p, name: e.target.value })} />
         </div>
         <div style="margin-top:13px">
-          <label class="lab">How much you move</label>
+          <label class="lab">${t("pf_move_l")}</label>
           <select class="in" value=${p.activity} onChange=${(e) => setP({ ...p, activity: e.target.value })}>
-            ${ACTIVITY.map((a) => html`<option key=${a.id} value=${a.id}>${a.label}</option>`)}
+            ${ACTIVITY.map((a) => html`<option key=${a.id} value=${a.id}>${t(a.key)}</option>`)}
           </select>
         </div>
         <div style="margin-top:13px">
-          <label class="lab">Pace</label>
+          <label class="lab">${t("pf_pace_l")}</label>
           <select class="in" value=${String(p.weeklyLoss)} onChange=${(e) => setP({ ...p, weeklyLoss: parseFloat(e.target.value) })}>
-            <option value="0.25">0.25 kg a week — gradual</option>
-            <option value="0.5">0.5 kg a week — steady</option>
-            <option value="0.75">0.75 kg a week — demanding</option>
+            <option value="0.25">${t("pf_pace_25")}</option>
+            <option value="0.5">${t("pf_pace_50")}</option>
+            <option value="0.75">${t("pf_pace_75")}</option>
           </select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px">
-          <div><label class="lab">Goal kg</label>
+          <div><label class="lab">${t("pf_goal_l")}</label>
             <input class="in" type="number" step="0.5" value=${p.goalWeight} onInput=${(e) => setP({ ...p, goalWeight: parseFloat(e.target.value) || p.goalWeight })} /></div>
-          <div><label class="lab">Stretch kg</label>
+          <div><label class="lab">${t("pf_stretch_l")}</label>
             <input class="in" type="number" step="0.5" value=${p.stretchWeight} onInput=${(e) => setP({ ...p, stretchWeight: parseFloat(e.target.value) || p.stretchWeight })} /></div>
         </div>
         <div style="margin-top:13px">
-          <label class="lab">Height cm</label>
+          <label class="lab">${t("pf_height_l")}</label>
           <input class="in" type="number" value=${p.heightCm} onInput=${(e) => setP({ ...p, heightCm: parseInt(e.target.value || "0", 10) || p.heightCm })} />
         </div>
         <div style="margin-top:13px">
-          <label class="lab">Date of birth</label>
+          <label class="lab">${t("pf_dob_l")}</label>
           <input class="in" type="date" value=${p.dob || ""} max=${todayKey()} min="1920-01-01"
             onInput=${(e) => setP({ ...p, dob: e.target.value })} />
           <div class="note" style="font-size:12px;margin-top:6px">
-            ${p.dob
-              ? "You're " + ageOf(p) + ". tally recalculates this itself, so your target moves on your birthday."
-              : "Set this and tally will keep your age up to date on its own. Until then it's using " + (p.age || 30) + "."}
+            ${p.dob ? t("pf_dob_set", { age: ageOf(p) }) : t("pf_dob_unset", { age: p.age || 30 })}
           </div>
         </div>
         <div style="margin-top:13px">
-          <label class="lab">Which does the formula fit better?</label>
+          <label class="lab">${t("ob_sex_l")}</label>
           <select class="in" value=${p.sex} onChange=${(e) => setP({ ...p, sex: e.target.value })}>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
+            <option value="male">${t("ob_male")}</option>
+            <option value="female">${t("ob_female")}</option>
           </select>
         </div>
         ${p.goalWeight < minHealthyKg(p.heightCm) && html`
           <div class="warn">
-            ${p.goalWeight + " kg is below the healthy range for " + p.heightCm + " cm, which starts around " + minHealthyKg(p.heightCm) + " kg. Worth raising with a doctor."}
+            ${t("pf_low", { goal: p.goalWeight, cm: p.heightCm, floor: minHealthyKg(p.heightCm) })}
           </div>`}
-        <button class="b b3" style="margin-top:17px" disabled=${!dirty} onClick=${() => onSave(p)}>${dirty ? "Save plan" : "Saved"}</button>
+        <button class="b b3" style="margin-top:17px" disabled=${!dirty} onClick=${() => onSave(p)}>${t(dirty ? "pf_save" : "pf_saved")}</button>
       </div>
 
       <div class="card">
-        <div class="h">Appearance</div>
-        <div class="note" style="margin-top:8px">
-          Left on Automatic, tally follows whatever your phone is set to and switches with it.
-        </div>
+        <div class="h">${t("lang_h")}</div>
+        <div class="note" style="margin-top:8px">${t("lang_note")}</div>
         <div class="seg" style="margin-top:13px">
-          ${[["system", "Automatic"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => html`
+          ${LANGS.map((l) => html`
+            <button class="segb" key=${l.id} data-on=${(p.lang || "en") === l.id ? "1" : "0"}
+              onClick=${() => {
+                /* Applied immediately like the theme — a language you have to
+                   save before seeing is no way to check you picked right. */
+                setP({ ...p, lang: l.id });
+                setLang(l.id);
+                onSave({ ...profile, lang: l.id });
+              }}>${l.label}</button>`)}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="h">${t("appearance_h")}</div>
+        <div class="note" style="margin-top:8px">${t("appearance_note")}</div>
+        <div class="seg" style="margin-top:13px">
+          ${[["system", "theme_system"], ["light", "theme_light"], ["dark", "theme_dark"]].map(([v, l]) => html`
             <button class="segb" key=${v} data-on=${(p.theme || "system") === v ? "1" : "0"}
               onClick=${() => {
                 /* Applied straight away rather than on Save — a theme you
@@ -1714,34 +2152,29 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
                 setP({ ...p, theme: v });
                 applyTheme(v);
                 onSave({ ...profile, theme: v });
-              }}>${l}</button>`)}
+              }}>${t(l)}</button>`)}
         </div>
       </div>
 
       <div class="card">
-        <div class="h">Your numbers</div>
+        <div class="h">${t("pf_numbers_h")}</div>
         <div style="margin-top:10px">
-          ${[["Resting burn", t.bmr + " cal"], ["Daily burn", t.tdee + " cal"], ["Eat each day", t.kcal + " cal"],
-             ["Protein", t.protein + " g"], ["Fat", t.fat + " g"], ["Carbs", t.carbs + " g"],
-             ["— of which fibre, at least", t.fibre + " g"], ["— of which sugar, at most", t.sugar + " g"]].map(([k, v], i) => html`
+          ${[[t("plan_bmr"), tg.bmr + " " + t("u_cal")], [t("plan_tdee"), tg.tdee + " " + t("u_cal")],
+             [t("plan_eat"), tg.kcal + " " + t("u_cal")], [t("m_protein"), tg.protein + " " + t("u_g")],
+             [t("m_fat"), tg.fat + " " + t("u_g")], [t("m_carbs"), tg.carbs + " " + t("u_g")],
+             [t("plan_fibre"), tg.fibre + " " + t("u_g")], [t("plan_sugar"), tg.sugar + " " + t("u_g")]].map(([k, v], i) => html`
             <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "11px 0", borderBottom: i === 7 ? "none" : "1px solid var(--hair)" }}>
               <span class="note" style="font-weight:500">${k}</span>
               <span class="d" style=${{ fontWeight: 700, fontSize: (i === 2 ? 21 : 16) + "px" }}>${v}</span>
             </div>`)}
         </div>
-        <div class="note" style="margin-top:12px">
-          Protein protects muscle while the weight comes off. Hit it first and let carbs and fat move around it.
-          The plan never drops below 1,500 calories.
-        </div>
+        <div class="note" style="margin-top:12px">${t("pf_numbers_note")}</div>
       </div>
 
       <div class="card">
-        <div class="h">Your data</div>
-        <div class="note" style="margin-top:8px">
-          Everything lives on this phone. Nothing is stored on the server. Export a backup before you
-          clear your browser data or change device.
-        </div>
-        <button class="b b2" style="margin-top:13px" onClick=${exportJson}>Export a backup</button>
+        <div class="h">${t("pf_data_h")}</div>
+        <div class="note" style="margin-top:8px">${t("pf_data_note")}</div>
+        <button class="b b2" style="margin-top:13px" onClick=${exportJson}>${t("pf_export")}</button>
 
         <input ref=${fileRef} type="file" accept="application/json,.json" style="display:none"
           onChange=${(e) => { readBackup(e.target.files && e.target.files[0]); e.target.value = ""; }} />
@@ -1749,32 +2182,32 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
         ${pending
           ? html`
             <div style="background:var(--bg);border-radius:18px;padding:15px;margin-top:8px">
-              <div style="font-weight:700;font-size:14.5px">Restore this backup?</div>
+              <div style="font-weight:700;font-size:14.5px">${t("pf_restore_h")}</div>
               <div class="note" style="margin-top:6px">
-                ${"It holds " + pending.meals + " meal" + (pending.meals === 1 ? "" : "s") +
-                  " across " + pending.dayKeys + " day" + (pending.dayKeys === 1 ? "" : "s") +
-                  " and " + pending.weighIns + " weigh-in" + (pending.weighIns === 1 ? "" : "s") +
-                  ". Anything already on this phone stays — the two are merged."}
+                ${t("pf_restore_s", {
+                  meals: pending.meals + " " + tp("meals", pending.meals),
+                  days: pending.dayKeys + " " + tp("dayw", pending.dayKeys),
+                  weighins: pending.weighIns + " " + tp("weighins", pending.weighIns) })}
               </div>
               <button class="b b3" style="margin-top:12px" onClick=${() => {
                 onImport(pending.data);
-                setDone("Restored " + pending.meals + " meals.");
+                setDone(t("pf_restored", { n: pending.meals + " " + tp("meals", pending.meals) }));
                 setPending(null);
-              }}>Merge it in</button>
-              <button class="b b2" style="margin-top:8px" onClick=${() => setPending(null)}>Cancel</button>
+              }}>${t("pf_merge")}</button>
+              <button class="b b2" style="margin-top:8px" onClick=${() => setPending(null)}>${t("pf_cancel")}</button>
             </div>`
-          : html`<button class="b b2" style="margin-top:8px" onClick=${() => fileRef.current && fileRef.current.click()}>Restore from a backup</button>`}
+          : html`<button class="b b2" style="margin-top:8px" onClick=${() => fileRef.current && fileRef.current.click()}>${t("pf_restore")}</button>`}
 
         ${impErr && html`<div class="err">${impErr}</div>`}
         ${done && html`<div class="note" style="margin-top:10px;color:var(--good);font-weight:600">${done}</div>`}
 
-        <button class="b b2" style="margin-top:8px" onClick=${() => { setPass(""); location.reload(); }}>Change passcode</button>
+        <button class="b b2" style="margin-top:8px" onClick=${() => { setPass(""); location.reload(); }}>${t("pf_changepass")}</button>
         ${confirm
           ? html`<div style="margin-top:8px">
-              <button class="b" style="background:var(--over)" onClick=${() => { onWipe(); setConfirm(false); }}>Yes, erase everything</button>
-              <button class="b b2" style="margin-top:8px" onClick=${() => setConfirm(false)}>Cancel</button>
+              <button class="b" style="background:var(--over)" onClick=${() => { onWipe(); setConfirm(false); }}>${t("pf_erase_yes")}</button>
+              <button class="b b2" style="margin-top:8px" onClick=${() => setConfirm(false)}>${t("pf_cancel")}</button>
             </div>`
-          : html`<button class="b b2" style="margin-top:8px;color:var(--over)" onClick=${() => setConfirm(true)}>Erase all data</button>`}
+          : html`<button class="b b2" style="margin-top:8px;color:var(--over)" onClick=${() => setConfirm(true)}>${t("pf_erase")}</button>`}
       </div>
     </div>`;
 }

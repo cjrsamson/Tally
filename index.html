@@ -25,6 +25,9 @@
   var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);
   var m=document.querySelector('meta[name=theme-color]');
   if(m)m.setAttribute("content",dark?"#0E1113":"#F7F8F5");
+  var lg=localStorage.getItem("tally.lang");
+  if(!lg){var n=(navigator.language||"").toLowerCase();lg=n.indexOf("uk")===0?"uk":"en";}
+  document.documentElement.lang=lg;
 }catch(e){}})();
 </script>
 

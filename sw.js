@@ -10,7 +10,7 @@
    serving the old copy.  tally-v2 -> tally-v3
 */
 
-const VERSION = "tally-v5";
+const VERSION = "tally-v6";
 const SHELL_CACHE = VERSION + "-shell";
 const CDN_CACHE = VERSION + "-cdn";
 
