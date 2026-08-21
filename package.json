@@ -1,0 +1,7 @@
+{
+  "name": "tally-api",
+  "private": true,
+  "dependencies": {
+    "@upstash/redis": "^1.38.2"
+  }
+}

@@ -7,6 +7,14 @@
  * who finds this URL cannot spend your credit.
  */
 
+import { Redis } from "@upstash/redis";
+import { recordUsage } from "./_usage-lib.js";
+
+/* fromEnv() reads UPSTASH_REDIS_REST_URL / TOKEN, falling back to
+   KV_REST_API_URL / TOKEN if a Vercel KV integration set those instead —
+   either name works without changing this file. */
+const redis = Redis.fromEnv();
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Use POST" });
@@ -76,6 +84,9 @@ export default async function handler(req, res) {
       res.status(status).json({ error: (data && data.error && data.error.message) || "Upstream error" });
       return;
     }
+    // Logged only on real success, and only against the code that was
+    // actually presented — a bad or missing passcode never reaches here.
+    await recordUsage(redis, given);
     res.status(200).json(data);
   } catch (err) {
     console.error(err);
