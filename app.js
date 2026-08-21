@@ -104,6 +104,20 @@ const dec = (n, places = 1) => {
   return LANG === "uk" ? s.replace(".", ",") : s;
 };
 
+/* Four-figure calorie numbers are much easier to read grouped. Only used
+   where a number is being presented for reading, never in an input. */
+const num = (n) => {
+  try { return Number(n).toLocaleString(LOCALE()); } catch { return String(n); }
+};
+
+/* Weights and paces carry a decimal only when there is one to carry, so a
+   goal of 68 kg reads as "68" and not "68.0". */
+const kgs = (n) => {
+  const v = Math.round(Number(n) * 100) / 100;
+  const s = Number.isInteger(v) ? String(v) : String(v);
+  return LANG === "uk" ? s.replace(".", ",") : s;
+};
+
 const STR = {
   en: {
     /* — language and appearance — */
@@ -114,10 +128,13 @@ const STR = {
     theme_system: "Automatic", theme_light: "Light", theme_dark: "Dark",
 
     /* — activity and meal slots — */
-    act_sedentary: "Mostly at a desk",
-    act_light: "Light — walking, a session or two",
-    act_moderate: "Moderate — tennis 3 to 4 times a week",
-    act_active: "Active — training most days",
+    act_sedentary: "Mostly sitting — desk job, drive or sit most of the day",
+    act_light: "A bit of walking — errands, part of the commute on foot",
+    act_moderate: "On my feet a good part of the day",
+    act_active: "Moving all day — physical or manual work",
+    eff_light: "Easy — brisk walking, gentle swim, light weights",
+    eff_moderate: "Moderate — jogging, tennis, an ordinary gym session",
+    eff_hard: "Hard — running, intervals, heavy lifting",
     slot_Breakfast: "Breakfast", slot_Lunch: "Lunch", slot_Dinner: "Dinner", slot_Snack: "Snack",
 
     /* — confidence and verdict — */
@@ -192,17 +209,45 @@ const STR = {
     ob_goal_high: "tally is set up for losing weight, so your goal needs to be below where you are now.",
     ob_lean: "You're already at the lean end of the healthy range for your height. Losing more isn't something to take on without talking to a doctor first.",
     ob_goal_low: "{goal} kg is below the healthy weight range for {cm} cm — that range starts around {floor} kg. You can carry on, but it's worth a conversation with a doctor before aiming there.",
-    ob_move_h: "How much do you move?",
-    ob_move_s: "Be honest rather than optimistic — an overestimate here inflates your budget every single day.",
+    ob_move_h: "An ordinary day",
+    ob_move_s: "Exercise is asked about on the next screen, so leave it out of this one — this is only the walking, standing and moving about you'd do anyway. Be honest rather than optimistic: an overestimate here inflates your budget every single day.",
+    ob_ex_h: "Training",
+    ob_ex_s: "Counted separately so it can be counted properly. It's averaged over the whole week, so two hard hours on a Saturday shows up as a little extra on every day.",
+    ob_ex_days_l: "Sessions a week",
+    ob_ex_mins_l: "Minutes in a typical one",
+    ob_ex_effort_l: "How hard, usually?",
+    ob_ex_none: "Nothing to add — your target comes from your ordinary day alone.",
+    ob_bf_l: "Body fat %, if you know it",
+    ob_bf_ph: "Optional",
+    ob_bf_range: "That needs to be between 5 and 60, or left blank.",
+    ob_bf_note: "Leave it blank unless you have a real reading from a scale, a caliper or a scan. With one, tally uses Katch-McArdle instead, which works off lean mass and is the more accurate of the two — particularly if you're notably lean or carrying more than average. A guess is worse than nothing here.",
     ob_pace_l: "How fast do you want it to come off?",
     ob_pace_25: "0.25 kg a week — gradual, barely noticeable",
     ob_pace_50: "0.5 kg a week — steady, the usual choice",
     ob_pace_75: "0.75 kg a week — demanding, harder to stick to",
     ob_plan_h: "Here's your plan",
-    ob_plan_s: "Worked out with Mifflin-St Jeor, the same equation most dietitians start from.",
-    plan_bmr: "Resting burn", plan_tdee: "Daily burn", plan_eat: "Eat each day",
+    ob_plan_s: "The whole sum is below, so you can see where every calorie came from rather than take the total on trust.",
     plan_fibre: "— of which fibre, at least", plan_sugar: "— of which sugar, at most",
-    ob_floor: "Your target has been held at the floor of {n} calories. tally won't go below that, so you'll lose a little slower than the pace you picked. That's deliberate.",
+
+    /* — the working-out — */
+    plan_how_h: "Where this number comes from",
+    calc_rest: "Resting burn",
+    calc_rest_mifflin: "Mifflin-St Jeor — from your age, height, weight and sex",
+    calc_rest_katch: "Katch-McArdle — from your lean mass, using the body fat figure you gave",
+    calc_living: "Moving about your day",
+    calc_ex: "Training",
+    calc_ex_s: "{days} × {mins} min, {effort}, averaged across the week",
+    calc_ex_none: "None — nothing added",
+    calc_maintain: "To stay at {kg} kg",
+    calc_maintain_s: "Eat about this much and your weight holds where it is",
+    calc_deficit: "Less, for {pace} kg a week",
+    calc_deficit_s: "A kilo of fat holds roughly 7,700 calories, so {pace} kg in a week works out at {n} fewer a day",
+    calc_target: "Eat each day",
+    calc_reach: "Hold to that and you'd be at {goal} kg in about {n} — around {date}.",
+    calc_floor: "Your pace asked for {want} fewer a day, but that would take you under {floor} calories and tally won't go there. It's holding {got} back instead, so expect nearer {kg} kg a week.",
+    calc_sessions: ["session", "sessions"],
+    weeksw: ["week", "weeks"],
+    calc_note: "These are estimates, not measurements. The resting burn is an equation, not a reading, and the activity figures are averages — real people land anywhere from 10% either side. Treat the number as a starting point: if the scale isn't moving the way this says it should after a fortnight of honest logging, the number is wrong and not you. Adjust it.",
     ob_code_l: "Access code", ob_code_ph: "The code you were sent",
     ob_code_note: "Whoever shared tally with you will have sent a code. It lets the app read your photos and costs them a little each time, which is why it's not open to everyone. You can add it later if you don't have it yet.",
     ob_medical: "These are estimates, not medical advice. If you're pregnant, managing a health condition, or have a history of disordered eating, talk to a doctor before following a calorie target.",
@@ -271,7 +316,13 @@ const STR = {
     /* — profile — */
     pf_plan_h: "Your plan",
     pf_name_l: "What should it call you?", pf_name_ph: "Your first name",
-    pf_move_l: "How much you move",
+    pf_move_l: "An ordinary day, exercise aside",
+    pf_ex_days_l: "Sessions a week",
+    pf_ex_mins_l: "Minutes each",
+    pf_ex_effort_l: "How hard",
+    pf_bf_l: "Body fat %",
+    pf_bf_ph: "Optional",
+    pf_bf_note: "Only fill this in from a real reading. With one, tally switches to Katch-McArdle, which is the more accurate equation.",
     pf_pace_l: "Pace",
     pf_pace_25: "0.25 kg a week — gradual", pf_pace_50: "0.5 kg a week — steady",
     pf_pace_75: "0.75 kg a week — demanding",
@@ -282,7 +333,7 @@ const STR = {
     pf_low: "{goal} kg is below the healthy range for {cm} cm, which starts around {floor} kg. Worth raising with a doctor.",
     pf_save: "Save plan", pf_saved: "Saved",
     pf_numbers_h: "Your numbers",
-    pf_numbers_note: "Protein protects muscle while the weight comes off. Hit it first and let carbs and fat move around it. The plan never drops below 1,500 calories.",
+    pf_numbers_note: "Protein protects muscle while the weight comes off. Hit it first and let carbs and fat move around it. The plan never drops below {floor} calories.",
     pf_data_h: "Your data",
     pf_data_note: "Everything lives on this phone. Nothing is stored on the server. Export a backup before you clear your browser data or change device.",
     pf_export: "Export a backup", pf_restore: "Restore from a backup",
@@ -292,7 +343,6 @@ const STR = {
     pf_restored: "Restored {n}.",
     pf_notbackup: "That doesn't look like a tally backup.",
     pf_badfile: "Couldn't read that file. Make sure it's the .json backup.",
-    pf_changepass: "Change passcode",
     pf_erase: "Erase all data", pf_erase_yes: "Yes, erase everything",
   },
 
@@ -303,10 +353,13 @@ const STR = {
     appearance_note: "У режимі «Автоматично» tally бере налаштування вашого телефона і змінюється разом із ним.",
     theme_system: "Автоматично", theme_light: "Світла", theme_dark: "Темна",
 
-    act_sedentary: "Переважно сидяча робота",
-    act_light: "Легка — прогулянки, одне-два тренування",
-    act_moderate: "Помірна — тренування 3–4 рази на тиждень",
-    act_active: "Активна — тренування майже щодня",
+    act_sedentary: "Переважно сиджу — офіс, авто, майже без ходьби",
+    act_light: "Трохи ходьби — справи, частина дороги пішки",
+    act_moderate: "Чималу частину дня на ногах",
+    act_active: "Увесь день у русі — фізична робота",
+    eff_light: "Легко — швидка ходьба, спокійний басейн, легкі ваги",
+    eff_moderate: "Помірно — біг підтюпцем, теніс, звичайне тренування",
+    eff_hard: "Важко — біг, інтервали, важкі ваги",
     slot_Breakfast: "Сніданок", slot_Lunch: "Обід", slot_Dinner: "Вечеря", slot_Snack: "Перекус",
 
     conf_high: "Добре видно", conf_medium: "Приблизна оцінка",
@@ -376,17 +429,44 @@ const STR = {
     ob_goal_high: "tally налаштований на зниження ваги, тому ціль має бути меншою за теперішню вагу.",
     ob_lean: "Ви вже у нижній частині здорового діапазону для свого зросту. Худнути далі варто лише після розмови з лікарем.",
     ob_goal_low: "{goal} кг — це нижче за здоровий діапазон для зросту {cm} см; він починається приблизно з {floor} кг. Ви можете продовжити, але спершу варто порадитися з лікарем.",
-    ob_move_h: "Наскільки ви рухаєтеся?",
-    ob_move_s: "Оцініть чесно, а не оптимістично — завищена оцінка щодня збільшуватиме вашу норму.",
+    ob_move_h: "Звичайний день",
+    ob_move_s: "Про тренування запитаємо на наступному екрані, тож сюди їх не рахуйте — тут лише ходьба, стояння та рух, які є у вас і без спорту. Оцініть чесно, а не оптимістично: завищена оцінка щодня збільшуватиме вашу норму.",
+    ob_ex_h: "Тренування",
+    ob_ex_s: "Рахуємо окремо, щоб порахувати як слід. Результат усереднюється на весь тиждень, тож дві важкі години в суботу додають потроху до кожного дня.",
+    ob_ex_days_l: "Тренувань на тиждень",
+    ob_ex_mins_l: "Хвилин за одне",
+    ob_ex_effort_l: "Наскільки важко зазвичай?",
+    ob_ex_none: "Нічого додавати — ваша норма спирається лише на звичайний день.",
+    ob_bf_l: "Відсоток жиру, якщо знаєте",
+    ob_bf_ph: "Необов’язково",
+    ob_bf_range: "Має бути від 5 до 60 або порожнє.",
+    ob_bf_note: "Залишіть порожнім, якщо не маєте справжнього вимірювання — вагами, каліпером чи скануванням. Якщо маєте, tally перейде на формулу Кетча-Макардла, яка рахує від сухої маси й точніша, особливо якщо ви дуже худі або маєте більше жиру за середнє. Здогад тут гірший за порожнє поле.",
     ob_pace_l: "Як швидко хочете худнути?",
     ob_pace_25: "0,25 кг на тиждень — поступово, майже непомітно",
     ob_pace_50: "0,5 кг на тиждень — рівно, звичайний вибір",
     ob_pace_75: "0,75 кг на тиждень — вимогливо, важче витримати",
     ob_plan_h: "Ось ваш план",
-    ob_plan_s: "Розраховано за формулою Міффліна-Сан Жеора, з якої починає більшість дієтологів.",
-    plan_bmr: "Витрати у спокої", plan_tdee: "Витрати за день", plan_eat: "Їсти щодня",
+    ob_plan_s: "Нижче — увесь розрахунок, щоб ви бачили, звідки взялася кожна калорія, а не просто вірили підсумку.",
     plan_fibre: "— з них клітковини, щонайменше", plan_sugar: "— з них цукру, не більше",
-    ob_floor: "Вашу норму зупинено на нижній межі — {n} ккал. tally не опускається нижче, тож ви худнутимете трохи повільніше за обраний темп. Так і задумано.",
+
+    plan_how_h: "Звідки взялося це число",
+    calc_rest: "Витрати у спокої",
+    calc_rest_mifflin: "Міффлін-Сан Жеор — з віку, зросту, ваги та статі",
+    calc_rest_katch: "Кетч-Макардл — із сухої маси, за вказаним відсотком жиру",
+    calc_living: "Рух протягом дня",
+    calc_ex: "Тренування",
+    calc_ex_s: "{days} × {mins} хв, {effort}, усереднено на тиждень",
+    calc_ex_none: "Немає — нічого не додано",
+    calc_maintain: "Щоб триматися на {kg} кг",
+    calc_maintain_s: "Їжте приблизно стільки — і вага стоятиме на місці",
+    calc_deficit: "Мінус, щоб втрачати {pace} кг на тиждень",
+    calc_deficit_s: "У кілограмі жиру приблизно 7700 ккал, тож {pace} кг за тиждень — це на {n} менше щодня",
+    calc_target: "Їсти щодня",
+    calc_reach: "Дотримуйтеся — і будете на {goal} кг приблизно за {n}, десь {date}.",
+    calc_floor: "Обраний темп вимагав на {want} менше щодня, але це опустило б вас нижче {floor} ккал, а туди tally не йде. Замість цього віднімається {got}, тож очікуйте радше {kg} кг на тиждень.",
+    calc_sessions: ["тренування", "тренування", "тренувань"],
+    weeksw: ["тиждень", "тижні", "тижнів"],
+    calc_note: "Це оцінки, а не вимірювання. Витрати у спокої — формула, а не показник приладу, а цифри активності усереднені: реальні люди відхиляються приблизно на 10% в обидва боки. Сприймайте число як відправну точку. Якщо після двох тижнів чесного обліку вага йде не так, як тут написано, помиляється число, а не ви — виправте його.",
     ob_code_l: "Код доступу", ob_code_ph: "Код, який вам надіслали",
     ob_code_note: "Той, хто поділився з вами tally, мав надіслати код. Він дозволяє застосунку розпізнавати ваші фото і щоразу трохи коштує власнику — тому доступ не відкритий для всіх. Код можна ввести й пізніше.",
     ob_medical: "Це оцінки, а не медичні поради. Якщо ви вагітні, маєте хронічне захворювання або в минулому були розлади харчової поведінки, порадьтеся з лікарем, перш ніж дотримуватися норми калорій.",
@@ -450,7 +530,13 @@ const STR = {
 
     pf_plan_h: "Ваш план",
     pf_name_l: "Як до вас звертатися?", pf_name_ph: "Ваше ім'я",
-    pf_move_l: "Скільки ви рухаєтеся",
+    pf_move_l: "Звичайний день, без тренувань",
+    pf_ex_days_l: "Тренувань на тиждень",
+    pf_ex_mins_l: "Хвилин за одне",
+    pf_ex_effort_l: "Наскільки важко",
+    pf_bf_l: "Жир, %",
+    pf_bf_ph: "Необов’язково",
+    pf_bf_note: "Заповнюйте лише за справжнім вимірюванням. Тоді tally перейде на формулу Кетча-Макардла — точнішу з двох.",
     pf_pace_l: "Темп",
     pf_pace_25: "0,25 кг на тиждень — поступово", pf_pace_50: "0,5 кг на тиждень — рівно",
     pf_pace_75: "0,75 кг на тиждень — вимогливо",
@@ -461,7 +547,7 @@ const STR = {
     pf_low: "{goal} кг — нижче за здоровий діапазон для зросту {cm} см, який починається приблизно з {floor} кг. Варто обговорити з лікарем.",
     pf_save: "Зберегти план", pf_saved: "Збережено",
     pf_numbers_h: "Ваші цифри",
-    pf_numbers_note: "Білок зберігає м'язи, поки йде вага. Тримайте його насамперед, а вуглеводи та жири підлаштовуйте навколо нього. План ніколи не опускається нижче 1500 ккал.",
+    pf_numbers_note: "Білок зберігає м'язи, поки йде вага. Тримайте його насамперед, а вуглеводи та жири підлаштовуйте навколо нього. План ніколи не опускається нижче {floor} ккал.",
     pf_data_h: "Ваші дані",
     pf_data_note: "Усе зберігається на цьому телефоні. На сервері нічого немає. Зробіть резервну копію, перш ніж очищати дані браузера або міняти телефон.",
     pf_export: "Зберегти резервну копію", pf_restore: "Відновити з копії",
@@ -471,25 +557,61 @@ const STR = {
     pf_restored: "Відновлено: {n}.",
     pf_notbackup: "Це не схоже на резервну копію tally.",
     pf_badfile: "Не вдалося прочитати файл. Переконайтеся, що це резервна копія .json.",
-    pf_changepass: "Змінити код доступу",
     pf_erase: "Стерти всі дані", pf_erase_yes: "Так, стерти все",
   },
 };
 
+/* ACTIVITY is now only the *baseline* — how much you move going about an
+   ordinary day, with no deliberate exercise in it at all. Exercise used to
+   be smuggled into these multipliers, which is the single biggest source of
+   error in a calorie target: one tap covered everything from a desk job with
+   a dog to a desk job plus five gym sessions, and the gap between those two
+   is 400 calories a day. It is asked for separately now. */
 const ACTIVITY = [
   { id: "sedentary", key: "act_sedentary", mult: 1.2 },
-  { id: "light", key: "act_light", mult: 1.375 },
-  { id: "moderate", key: "act_moderate", mult: 1.55 },
-  { id: "active", key: "act_active", mult: 1.725 },
+  { id: "light", key: "act_light", mult: 1.35 },
+  { id: "moderate", key: "act_moderate", mult: 1.5 },
+  { id: "active", key: "act_active", mult: 1.7 },
 ];
+
+/* Exercise is costed in METs — the standard multiple-of-resting-burn table.
+   A MET is subtracted from each because the baseline multiplier above is
+   already paying for the resting calories you'd have burned during that
+   hour anyway; counting them twice inflates the budget. */
+const EFFORT = [
+  { id: "light", key: "eff_light", met: 4 },
+  { id: "moderate", key: "eff_moderate", met: 6 },
+  { id: "hard", key: "eff_hard", met: 9 },
+];
+
+/* Calories in a kilogram of body fat. 7,700 is the figure the equation the
+   rest of the app uses is built on. */
+const KCAL_PER_KG = 7700;
+
 const SLOTS = ["Breakfast", "Lunch", "Dinner", "Snack"];
 const SLOT_ICON = { Breakfast: "🍳", Lunch: "🥗", Dinner: "🍽️", Snack: "🍎" };
 const DEFAULTS = {
   onboarded: false,
   name: "", heightCm: 170, dob: "", age: 30, sex: "male", startWeight: 75,
   goalWeight: 72, stretchWeight: 70, activity: "light", weeklyLoss: 0.5,
+  exDays: 0, exMins: 45, exEffort: "moderate", bodyFat: null,
   theme: "system", lang: "en",
 };
+
+/* Profiles written before exercise was asked about separately have it baked
+   into their activity choice. Pulling it back out keeps their target roughly
+   where it was instead of silently dropping a few hundred calories. */
+const OLD_ACTIVITY_SPLIT = {
+  sedentary: { activity: "sedentary", exDays: 0, exMins: 45, exEffort: "moderate" },
+  light: { activity: "light", exDays: 2, exMins: 30, exEffort: "light" },
+  moderate: { activity: "light", exDays: 4, exMins: 60, exEffort: "moderate" },
+  active: { activity: "moderate", exDays: 5, exMins: 60, exEffort: "moderate" },
+};
+function migrateActivity(p) {
+  if (!p || p.exDays !== undefined) return p;
+  const split = OLD_ACTIVITY_SPLIT[p.activity] || OLD_ACTIVITY_SPLIT.light;
+  return { ...p, ...split };
+}
 
 /* ---------------------------------------------------------------- theme */
 
@@ -541,18 +663,62 @@ const isBirthday = (p) => {
 const bmiOf = (kg, cm) => kg / Math.pow((cm || 1) / 100, 2);
 const minHealthyKg = (cm) => Math.round(18.5 * Math.pow((cm || 1) / 100, 2) * 10) / 10;
 
-function deriveTargets(p, w0) {
+function deriveTargets(p0, w0) {
+  const p = migrateActivity(p0);
   const w = w0 || p.startWeight;
-  const bmr = 10 * w + 6.25 * p.heightCm - 5 * ageOf(p) + (p.sex === "female" ? -161 : 5);
-  const tdee = bmr * (ACTIVITY.find((a) => a.id === p.activity) || ACTIVITY[1]).mult;
+
+  /* Resting burn. Mifflin-St Jeor is the default because it only needs
+     things everybody knows about themselves. If a body fat percentage has
+     been entered, Katch-McArdle is used instead: it works off lean mass
+     rather than total weight, which makes it markedly more accurate at both
+     ends — a lean, heavy person and a heavier, less lean one can share a
+     weight and not a resting burn. */
+  const bf = typeof p.bodyFat === "number" && p.bodyFat >= 5 && p.bodyFat <= 60 ? p.bodyFat : null;
+  const mifflin = 10 * w + 6.25 * p.heightCm - 5 * ageOf(p) + (p.sex === "female" ? -161 : 5);
+  const bmr = bf === null ? mifflin : 370 + 21.6 * (w * (1 - bf / 100));
+  const method = bf === null ? "mifflin" : "katch";
+
+  /* Everything you burn moving about an ordinary day, exercise excluded. */
+  const mult = (ACTIVITY.find((a) => a.id === p.activity) || ACTIVITY[1]).mult;
+  const living = bmr * (mult - 1);
+
+  /* And exercise on top, averaged flat across the week. */
+  const met = (EFFORT.find((e) => e.id === p.exEffort) || EFFORT[1]).met;
+  const exDays = Math.max(0, Math.min(7, p.exDays || 0));
+  const exMins = Math.max(0, Math.min(300, p.exMins || 0));
+  const exercise = ((met - 1) * 3.5 * w / 200) * exMins * exDays / 7;
+
+  const tdee = bmr + living + exercise;
+
+  /* The deficit the chosen pace asks for, and the deficit actually applied
+     once the floor has had its say. They differ for anyone whose pace would
+     take them under it, and the app would rather be honest about that than
+     quietly promise a rate it isn't delivering. */
+  const wantDeficit = (p.weeklyLoss * KCAL_PER_KG) / 7;
   const floor = p.sex === "female" ? 1200 : 1500;
-  const kcal = Math.max(floor, Math.round((tdee - (p.weeklyLoss * 7700) / 7) / 10) * 10);
+  const kcal = Math.max(floor, Math.round((tdee - wantDeficit) / 10) * 10);
+  const deficit = Math.max(0, Math.round(tdee) - kcal);
+
   const protein = Math.round(w * 1.8), fat = Math.round(w * 0.8);
   /* Carbs take whatever calories protein and fat leave behind, converted to
      grams at 4 cal per gram, then rounded to the nearest 5. */
   const carbCals = kcal - protein * 4 - fat * 9;
   return {
     bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, protein, fat,
+    /* The sum, kept so the app can show its working rather than just
+       announcing a number and hoping it's believed. */
+    /* Living is derived by subtraction rather than rounded on its own, so
+       the three rows visibly add to the maintenance figure. Nothing erodes
+       trust in a number like a column that doesn't sum. */
+    method, exercise: Math.round(exercise),
+    living: Math.round(tdee) - Math.round(bmr) - Math.round(exercise),
+    maintain: Math.round(tdee), deficit,
+    wantDeficit: Math.round(wantDeficit),
+    atFloor: deficit < Math.round(wantDeficit) - 5,
+    floor,
+    /* What the applied deficit actually works out to per week, which is the
+       chosen pace unless the floor clipped it. */
+    weeklyKg: Math.round(((deficit * 7) / KCAL_PER_KG) * 100) / 100,
     carbs: Math.max(0, Math.round(carbCals / 4 / 5) * 5),
     /* Fibre: 14 g per 1,000 calories, the figure dietary guidelines use,
        with a sensible floor. Sugar: the WHO's suggested ceiling of 10% of
@@ -1290,13 +1456,88 @@ export function App() {
     </div>`;
 }
 
+/* ======================= where the number comes from ======================= */
+
+/* Shown identically in onboarding and in the profile. A calorie target is
+   a number somebody is going to be told to live inside for months, and one
+   that arrives with no working shown is either taken on blind faith or, more
+   often, quietly ignored. This is the arithmetic, line by line. */
+function PlanBreakdown({ T, p, weight }) {
+  const w = weight || p.startWeight;
+  const q = migrateActivity(p);
+  const act = ACTIVITY.find((a) => a.id === q.activity) || ACTIVITY[1];
+  const eff = EFFORT.find((e) => e.id === q.exEffort) || EFFORT[1];
+  const exDays = Math.max(0, Math.min(7, q.exDays || 0));
+
+  /* Time to goal, from the deficit actually being applied rather than the
+     one that was asked for. Weight loss is never this linear, hence "about". */
+  const toLose = w - (q.goalWeight || w);
+  const weeks = T.deficit > 0 && toLose > 0
+    ? Math.round((toLose * KCAL_PER_KG) / (T.deficit * 7))
+    : null;
+  const when = weeks
+    ? new Date(Date.now() + weeks * 7 * 86400000)
+        .toLocaleDateString(LOCALE(), { month: "long", year: "numeric" })
+    : null;
+
+  const Row = (label, sub, value, attrs = {}) => html`
+    <div class="calcr" ...${attrs}>
+      <div>
+        <div class="calcl">${label}</div>
+        ${sub && html`<div class="calcsub">${sub}</div>`}
+      </div>
+      <div class="calcv">${value}</div>
+    </div>`;
+
+  return html`
+    <div class="card">
+      <div class="h">${t("plan_how_h")}</div>
+      <div class="calc" style="margin-top:10px">
+        ${Row(t("calc_rest"), t(T.method === "katch" ? "calc_rest_katch" : "calc_rest_mifflin"),
+          num(T.bmr))}
+        ${Row(t("calc_living"), t(act.key), "+" + num(T.living))}
+        ${Row(t("calc_ex"),
+          exDays > 0
+            ? t("calc_ex_s", { days: exDays + " " + tp("calc_sessions", exDays), mins: q.exMins, effort: t(eff.key).toLowerCase() })
+            : t("calc_ex_none"),
+          "+" + num(T.exercise))}
+        ${Row(t("calc_maintain", { kg: kgs(w) }), t("calc_maintain_s"),
+          num(T.maintain), { "data-rule": "1", "data-sum": "1" })}
+        ${Row(t("calc_deficit", { pace: kgs(q.weeklyLoss) }),
+          t("calc_deficit_s", {
+            pace: kgs(q.weeklyLoss),
+            n: num(T.deficit) + " " + t("u_cal"),
+          }),
+          "−" + num(T.deficit))}
+        ${Row(t("calc_target"), null, num(T.kcal),
+          { "data-rule": "1", "data-sum": "1", "data-final": "1" })}
+      </div>
+
+      ${weeks && when && html`
+        <div class="note" style="margin-top:12px">
+          ${t("calc_reach", { goal: kgs(q.goalWeight), n: weeks + " " + tp("weeksw", weeks), date: when })}
+        </div>`}
+
+      ${T.atFloor && html`
+        <div class="warn">
+          ${t("calc_floor", {
+            want: num(T.wantDeficit), floor: num(T.floor), got: num(T.deficit),
+            kg: kgs(T.weeklyKg),
+          })}
+        </div>`}
+
+      <div class="note" style="margin-top:12px;font-size:12px">${t("calc_note")}</div>
+    </div>`;
+}
+
 /* ============================ onboarding ============================ */
 
 function Onboarding({ onDone, lang, onLang }) {
   const [i, setI] = useState(0);
   const [f, setF] = useState({
     name: "", dob: "", sex: "male", heightCm: "", weight: "", goalWeight: "",
-    activity: "light", weeklyLoss: 0.5, pass: "",
+    activity: "light", exDays: 0, exMins: 45, exEffort: "moderate", bodyFat: "",
+    weeklyLoss: 0.5, pass: "",
   });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -1313,10 +1554,17 @@ function Onboarding({ onDone, lang, onLang }) {
   const goalNotLower = isFinite(goal) && isFinite(kg) && goal >= kg;
   const alreadyLean = isFinite(kg) && isFinite(cm) && bmiOf(kg, cm) < 18.5;
 
+  /* Blank is a valid answer here; a number outside the plausible range is
+     not, and is treated as blank rather than quietly skewing the equation. */
+  const bfRaw = parseFloat(f.bodyFat);
+  const bodyFat = isFinite(bfRaw) && bfRaw >= 5 && bfRaw <= 60 ? bfRaw : null;
+  const bfBad = f.bodyFat !== "" && bodyFat === null;
+
   const okStep = [
     () => f.name.trim().length > 0,
     () => age !== null && age >= 18 && age <= 100 && isFinite(cm) && cm >= 120 && cm <= 230,
-    () => isFinite(kg) && kg >= 35 && kg <= 250 && isFinite(goal) && goal >= 35 && goal <= 250 && !goalNotLower,
+    () => isFinite(kg) && kg >= 35 && kg <= 250 && isFinite(goal) && goal >= 35 && goal <= 250 && !goalNotLower && !bfBad,
+    () => true,
     () => true,
     () => true,
   ][i]();
@@ -1326,9 +1574,9 @@ function Onboarding({ onDone, lang, onLang }) {
     sex: f.sex, heightCm: Math.round(cm),
     startWeight: kg, goalWeight: goal, stretchWeight: Math.max(floorKg || 0, Math.round((goal - 2.5) * 10) / 10),
     activity: f.activity, weeklyLoss: f.weeklyLoss,
+    exDays: f.exDays, exMins: f.exMins, exEffort: f.exEffort, bodyFat,
   };
-  const T = i === 4 ? deriveTargets(draft, kg) : null;
-  const atFloor = T && T.kcal <= (f.sex === "female" ? 1200 : 1500);
+  const T = i === 5 ? deriveTargets(draft, kg) : null;
 
   const finish = () => {
     if (f.pass.trim()) setPass(f.pass.trim());
@@ -1340,7 +1588,7 @@ function Onboarding({ onDone, lang, onLang }) {
   return html`
     <div class="ob">
       <div class="dots">
-        ${[0, 1, 2, 3, 4].map((n) => html`<div class="dot" key=${n} data-on=${n <= i ? "1" : "0"}></div>`)}
+        ${[0, 1, 2, 3, 4, 5].map((n) => html`<div class="dot" key=${n} data-on=${n <= i ? "1" : "0"}></div>`)}
       </div>
 
       <div style="flex:1">
@@ -1405,6 +1653,13 @@ function Onboarding({ onDone, lang, onLang }) {
               <div class="warn">
                 ${t("ob_goal_low", { goal, cm: Math.round(cm), floor: floorKg })}
               </div>`}
+            <div style="margin-top:20px">
+              <label class="lab">${t("ob_bf_l")}</label>
+              <input class="in" type="number" step="0.5" inputmode="decimal"
+                placeholder=${t("ob_bf_ph")} value=${f.bodyFat} onInput=${set("bodyFat")} />
+              <div class="obs" style="font-size:12.5px;margin-top:8px">${t("ob_bf_note")}</div>
+              ${bfBad && html`<div class="err">${t("ob_bf_range")}</div>`}
+            </div>
           </div>`}
 
         ${i === 3 && html`
@@ -1415,7 +1670,37 @@ function Onboarding({ onDone, lang, onLang }) {
                 <button class="opt" key=${a.id} data-on=${f.activity === a.id ? "1" : "0"}
                   onClick=${() => setF({ ...f, activity: a.id })}>${t(a.key)}</button>`)}
             </div>
-            <div style="margin-top:20px">
+          </div>`}
+
+        ${i === 4 && html`
+          <div>
+            ${Head(t("ob_ex_h"), t("ob_ex_s"))}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px">
+              <div>
+                <label class="lab">${t("ob_ex_days_l")}</label>
+                <select class="in" value=${String(f.exDays)}
+                  onChange=${(e) => setF({ ...f, exDays: parseInt(e.target.value, 10) })}>
+                  ${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+                </select>
+              </div>
+              <div>
+                <label class="lab">${t("ob_ex_mins_l")}</label>
+                <select class="in" value=${String(f.exMins)} disabled=${f.exDays === 0}
+                  onChange=${(e) => setF({ ...f, exMins: parseInt(e.target.value, 10) })}>
+                  ${[15, 30, 45, 60, 75, 90, 120].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+                </select>
+              </div>
+            </div>
+            ${f.exDays === 0
+              ? html`<div class="note" style="margin-top:14px">${t("ob_ex_none")}</div>`
+              : html`
+                <div style="margin-top:20px">
+                  <label class="lab">${t("ob_ex_effort_l")}</label>
+                  ${EFFORT.map((e) => html`
+                    <button class="opt" key=${e.id} data-on=${f.exEffort === e.id ? "1" : "0"}
+                      onClick=${() => setF({ ...f, exEffort: e.id })}>${t(e.key)}</button>`)}
+                </div>`}
+            <div style="margin-top:22px">
               <label class="lab">${t("ob_pace_l")}</label>
               ${[[0.25, "ob_pace_25"], [0.5, "ob_pace_50"], [0.75, "ob_pace_75"]].map(([v, l]) => html`
                 <button class="opt" key=${v} data-on=${f.weeklyLoss === v ? "1" : "0"}
@@ -1423,24 +1708,26 @@ function Onboarding({ onDone, lang, onLang }) {
             </div>
           </div>`}
 
-        ${i === 4 && T && html`
+        ${i === 5 && T && html`
           <div>
             ${Head(t("ob_plan_h"), t("ob_plan_s"))}
-            <div class="card" style="margin-top:18px">
-              ${[[t("plan_bmr"), T.bmr + " " + t("u_cal")], [t("plan_tdee"), T.tdee + " " + t("u_cal")],
-                 [t("plan_eat"), T.kcal + " " + t("u_cal")], [t("m_protein"), T.protein + " " + t("u_g")],
-                 [t("m_fat"), T.fat + " " + t("u_g")], [t("m_carbs"), T.carbs + " " + t("u_g")],
-                 [t("plan_fibre"), T.fibre + " " + t("u_g")], [t("plan_sugar"), T.sugar + " " + t("u_g")]].map(([k, v], n) => html`
-                <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                  padding: "11px 0", borderBottom: n === 7 ? "none" : "1px solid var(--hair)" }}>
-                  <span class="note" style="font-weight:500">${k}</span>
-                  <span class="d" style=${{ fontWeight: 700, fontSize: (n === 2 ? 21 : 16) + "px", opacity: n > 5 ? .75 : 1 }}>${v}</span>
-                </div>`)}
+            <div style="margin-top:4px">
+              <${PlanBreakdown} T=${T} p=${draft} weight=${kg} />
             </div>
-            ${atFloor && html`
-              <div class="warn">
-                ${t("ob_floor", { n: f.sex === "female" ? 1200 : 1500 })}
-              </div>`}
+            <div class="card">
+              <div class="h">${t("pf_numbers_h")}</div>
+              <div style="margin-top:10px">
+                ${[[t("m_protein"), T.protein + " " + t("u_g")], [t("m_fat"), T.fat + " " + t("u_g")],
+                   [t("m_carbs"), T.carbs + " " + t("u_g")], [t("plan_fibre"), T.fibre + " " + t("u_g")],
+                   [t("plan_sugar"), T.sugar + " " + t("u_g")]].map(([k, v], n) => html`
+                  <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                    padding: "11px 0", borderBottom: n === 4 ? "none" : "1px solid var(--hair)" }}>
+                    <span class="note" style="font-weight:500">${k}</span>
+                    <span class="d" style=${{ fontWeight: 700, fontSize: "16px", opacity: n > 2 ? .75 : 1 }}>${v}</span>
+                  </div>`)}
+              </div>
+              <div class="note" style="margin-top:12px">${t("pf_numbers_note", { floor: num(T.floor) })}</div>
+            </div>
             <div style="margin-top:18px">
               <label class="lab">${t("ob_code_l")}</label>
               <input class="in" type="password" placeholder=${t("ob_code_ph")} value=${f.pass} onInput=${set("pass")} />
@@ -1452,7 +1739,7 @@ function Onboarding({ onDone, lang, onLang }) {
 
       <div style="display:flex;gap:9px;margin-top:26px">
         ${i > 0 && html`<button class="b b2" style="width:auto;padding:15px 22px" onClick=${() => setI(i - 1)}>${t("ob_back")}</button>`}
-        ${i < 4
+        ${i < 5
           ? html`<button class="b" onClick=${() => setI(i + 1)} disabled=${!okStep || tooYoung}>${t("ob_continue")}</button>`
           : html`<button class="b b3" onClick=${finish}>${t("ob_start")}</button>`}
       </div>
@@ -2025,14 +2312,17 @@ function Progress({ days, weights, profile, T, weight, dayTotal, onLog }) {
 /* ============================ profile ============================ */
 
 function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
-  const [p, setP] = useState(profile);
+  /* Anyone onboarded before exercise was asked about separately gets it
+     unpicked from their old activity choice on the way in, so the controls
+     below show real values rather than blanks. */
+  const [p, setP] = useState(() => migrateActivity(profile));
   const [confirm, setConfirm] = useState(false);
   const [pending, setPending] = useState(null);
   const [impErr, setImpErr] = useState("");
   const [done, setDone] = useState("");
   const fileRef = useRef(null);
   const tg = deriveTargets(p, weight);
-  const dirty = JSON.stringify(p) !== JSON.stringify(profile);
+  const dirty = JSON.stringify(p) !== JSON.stringify(migrateActivity(profile));
 
   const exportJson = async () => {
     const text = JSON.stringify({ profile, days, weights }, null, 2);
@@ -2083,6 +2373,40 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
           <select class="in" value=${p.activity} onChange=${(e) => setP({ ...p, activity: e.target.value })}>
             ${ACTIVITY.map((a) => html`<option key=${a.id} value=${a.id}>${t(a.key)}</option>`)}
           </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px">
+          <div>
+            <label class="lab">${t("pf_ex_days_l")}</label>
+            <select class="in" value=${String(p.exDays || 0)}
+              onChange=${(e) => setP({ ...p, exDays: parseInt(e.target.value, 10) })}>
+              ${[0, 1, 2, 3, 4, 5, 6, 7].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+            </select>
+          </div>
+          <div>
+            <label class="lab">${t("pf_ex_mins_l")}</label>
+            <select class="in" value=${String(p.exMins || 45)} disabled=${!p.exDays}
+              onChange=${(e) => setP({ ...p, exMins: parseInt(e.target.value, 10) })}>
+              ${[15, 30, 45, 60, 75, 90, 120].map((n) => html`<option key=${n} value=${n}>${n}</option>`)}
+            </select>
+          </div>
+        </div>
+        ${!!p.exDays && html`
+          <div style="margin-top:13px">
+            <label class="lab">${t("pf_ex_effort_l")}</label>
+            <select class="in" value=${p.exEffort || "moderate"}
+              onChange=${(e) => setP({ ...p, exEffort: e.target.value })}>
+              ${EFFORT.map((e) => html`<option key=${e.id} value=${e.id}>${t(e.key)}</option>`)}
+            </select>
+          </div>`}
+        <div style="margin-top:13px">
+          <label class="lab">${t("pf_bf_l")}</label>
+          <input class="in" type="number" step="0.5" inputmode="decimal" placeholder=${t("pf_bf_ph")}
+            value=${p.bodyFat === null || p.bodyFat === undefined ? "" : p.bodyFat}
+            onInput=${(e) => {
+              const v = parseFloat(e.target.value);
+              setP({ ...p, bodyFat: isFinite(v) && v >= 5 && v <= 60 ? v : null });
+            }} />
+          <div class="note" style="font-size:12px;margin-top:6px">${t("pf_bf_note")}</div>
         </div>
         <div style="margin-top:13px">
           <label class="lab">${t("pf_pace_l")}</label>
@@ -2156,19 +2480,20 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
         </div>
       </div>
 
+      <${PlanBreakdown} T=${tg} p=${p} weight=${weight} />
+
       <div class="card">
         <div class="h">${t("pf_numbers_h")}</div>
         <div style="margin-top:10px">
-          ${[[t("plan_bmr"), tg.bmr + " " + t("u_cal")], [t("plan_tdee"), tg.tdee + " " + t("u_cal")],
-             [t("plan_eat"), tg.kcal + " " + t("u_cal")], [t("m_protein"), tg.protein + " " + t("u_g")],
-             [t("m_fat"), tg.fat + " " + t("u_g")], [t("m_carbs"), tg.carbs + " " + t("u_g")],
-             [t("plan_fibre"), tg.fibre + " " + t("u_g")], [t("plan_sugar"), tg.sugar + " " + t("u_g")]].map(([k, v], i) => html`
-            <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "11px 0", borderBottom: i === 7 ? "none" : "1px solid var(--hair)" }}>
+          ${[[t("m_protein"), tg.protein + " " + t("u_g")], [t("m_fat"), tg.fat + " " + t("u_g")],
+             [t("m_carbs"), tg.carbs + " " + t("u_g")], [t("plan_fibre"), tg.fibre + " " + t("u_g")],
+             [t("plan_sugar"), tg.sugar + " " + t("u_g")]].map(([k, v], i) => html`
+            <div key=${k} style=${{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "11px 0", borderBottom: i === 4 ? "none" : "1px solid var(--hair)" }}>
               <span class="note" style="font-weight:500">${k}</span>
-              <span class="d" style=${{ fontWeight: 700, fontSize: (i === 2 ? 21 : 16) + "px" }}>${v}</span>
+              <span class="d" style=${{ fontWeight: 700, fontSize: "16px", opacity: i > 2 ? .75 : 1 }}>${v}</span>
             </div>`)}
         </div>
-        <div class="note" style="margin-top:12px">${t("pf_numbers_note")}</div>
+        <div class="note" style="margin-top:12px">${t("pf_numbers_note", { floor: num(tg.floor) })}</div>
       </div>
 
       <div class="card">
@@ -2201,7 +2526,9 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
         ${impErr && html`<div class="err">${impErr}</div>`}
         ${done && html`<div class="note" style="margin-top:10px;color:var(--good);font-weight:600">${done}</div>`}
 
-        <button class="b b2" style="margin-top:8px" onClick=${() => { setPass(""); location.reload(); }}>${t("pf_changepass")}</button>
+        ${/* The passcode sheet still appears on its own if the server ever
+             rejects the stored code, so there is nothing to change here by
+             hand. */ ""}
         ${confirm
           ? html`<div style="margin-top:8px">
               <button class="b" style="background:var(--over)" onClick=${() => { onWipe(); setConfirm(false); }}>${t("pf_erase_yes")}</button>

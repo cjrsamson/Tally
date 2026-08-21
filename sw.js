@@ -7,10 +7,10 @@
                    given URL (they are version-pinned), so cache-first forever.
 
    Bump VERSION after editing index.html or app.js, or the phone will keep
-   serving the old copy.  tally-v2 -> tally-v3
+   serving the old copy.  tally-v6 -> tally-v7
 */
 
-const VERSION = "tally-v6";
+const VERSION = "tally-v7";
 const SHELL_CACHE = VERSION + "-shell";
 const CDN_CACHE = VERSION + "-cdn";
 
