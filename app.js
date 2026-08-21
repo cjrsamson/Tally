@@ -2321,7 +2321,14 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
   const [impErr, setImpErr] = useState("");
   const [done, setDone] = useState("");
   const fileRef = useRef(null);
-  const tg = deriveTargets(p, weight);
+  /* The field itself keeps whatever text was typed, so a keystroke that
+     briefly isn't yet a valid number (typing "2" on the way to "28") never
+     gets snapped back to blank. Parsing and clamping happen here instead,
+     for the live preview and the eventual save. */
+  const bfRaw = parseFloat(p.bodyFat);
+  const bfNum = isFinite(bfRaw) && bfRaw >= 5 && bfRaw <= 60 ? bfRaw : null;
+  const bfBad = p.bodyFat !== "" && p.bodyFat !== null && p.bodyFat !== undefined && bfNum === null;
+  const tg = deriveTargets({ ...p, bodyFat: bfNum }, weight);
   const dirty = JSON.stringify(p) !== JSON.stringify(migrateActivity(profile));
 
   const exportJson = async () => {
@@ -2402,11 +2409,9 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
           <label class="lab">${t("pf_bf_l")}</label>
           <input class="in" type="number" step="0.5" inputmode="decimal" placeholder=${t("pf_bf_ph")}
             value=${p.bodyFat === null || p.bodyFat === undefined ? "" : p.bodyFat}
-            onInput=${(e) => {
-              const v = parseFloat(e.target.value);
-              setP({ ...p, bodyFat: isFinite(v) && v >= 5 && v <= 60 ? v : null });
-            }} />
+            onInput=${(e) => setP({ ...p, bodyFat: e.target.value })} />
           <div class="note" style="font-size:12px;margin-top:6px">${t("pf_bf_note")}</div>
+          ${bfBad && html`<div class="err">${t("ob_bf_range")}</div>`}
         </div>
         <div style="margin-top:13px">
           <label class="lab">${t("pf_pace_l")}</label>
@@ -2445,7 +2450,7 @@ function Profile({ profile, weight, days, weights, onSave, onImport, onWipe }) {
           <div class="warn">
             ${t("pf_low", { goal: p.goalWeight, cm: p.heightCm, floor: minHealthyKg(p.heightCm) })}
           </div>`}
-        <button class="b b3" style="margin-top:17px" disabled=${!dirty} onClick=${() => onSave(p)}>${t(dirty ? "pf_save" : "pf_saved")}</button>
+        <button class="b b3" style="margin-top:17px" disabled=${!dirty || bfBad} onClick=${() => onSave({ ...p, bodyFat: bfNum })}>${t(dirty ? "pf_save" : "pf_saved")}</button>
       </div>
 
       <div class="card">
